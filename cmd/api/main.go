@@ -117,13 +117,11 @@ func main() {
 	handlers := api.NewHandlers(cmdHandler, queryHandler)
 	authHandlers := api.NewAuthHandlers(userSvc, jwtService, readStore)
 	categoryHandlers := api.NewCategoryHandlers(categorySvc, readStore)
-	webDir := getEnv("WEB_DIR", "./web")
 	router := api.NewRouter(api.RouterConfig{
 		Handlers:         handlers,
 		AuthHandlers:     authHandlers,
 		CategoryHandlers: categoryHandlers,
 		JWTService:       jwtService,
-		WebDir:           webDir,
 	})
 
 	// Start HTTP server

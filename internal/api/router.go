@@ -14,17 +14,10 @@ type RouterConfig struct {
 	AuthHandlers     *AuthHandlers
 	CategoryHandlers *CategoryHandlers
 	JWTService       *auth.JWTService
-	WebDir           string
 }
 
 func NewRouter(config RouterConfig) http.Handler {
 	mux := http.NewServeMux()
-
-	// Static files (web UI)
-	if config.WebDir != "" {
-		fs := http.FileServer(http.Dir(config.WebDir))
-		mux.Handle("/", fs)
-	}
 
 	// Authentication routes (no auth required)
 	mux.HandleFunc("/api/auth/register", func(w http.ResponseWriter, r *http.Request) {
