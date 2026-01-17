@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
@@ -23,9 +23,6 @@ FROM alpine:3.19 AS api
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /api /api
-COPY --from=builder /app/web /web
-
-ENV WEB_DIR=/web
 
 EXPOSE 8080
 

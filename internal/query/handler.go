@@ -68,6 +68,16 @@ func (h *Handler) ListOrdersByUser(userID string) []*OrderReadModel {
 	return orders
 }
 
+// ListAllOrders returns all orders (for admin use)
+func (h *Handler) ListAllOrders() []*OrderReadModel {
+	items := h.readStore.GetAll("orders")
+	orders := make([]*OrderReadModel, 0, len(items))
+	for _, item := range items {
+		orders = append(orders, item.(*OrderReadModel))
+	}
+	return orders
+}
+
 // Inventory
 func (h *Handler) GetInventory(productID string) (*InventoryReadModel, bool) {
 	data, ok := h.readStore.Get("inventory", productID)

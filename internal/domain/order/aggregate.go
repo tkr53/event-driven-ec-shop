@@ -27,13 +27,13 @@ var (
 )
 
 type Order struct {
-	ID        string
-	UserID    string
-	Items     []OrderItem
-	Total     int
-	Status    Status
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        string      `json:"id"`
+	UserID    string      `json:"user_id"`
+	Items     []OrderItem `json:"items"`
+	Total     int         `json:"total"`
+	Status    Status      `json:"status"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 type Service struct {

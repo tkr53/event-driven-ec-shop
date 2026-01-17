@@ -18,14 +18,14 @@ var (
 )
 
 type Product struct {
-	ID          string
-	Name        string
-	Description string
-	Price       int
-	Stock       int
-	IsDeleted   bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Price       int       `json:"price"`
+	Stock       int       `json:"stock"`
+	IsDeleted   bool      `json:"is_deleted,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type Service struct {

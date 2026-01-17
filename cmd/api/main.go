@@ -12,11 +12,14 @@ import (
 	"time"
 
 	"github.com/example/ec-event-driven/internal/api"
+	"github.com/example/ec-event-driven/internal/auth"
 	"github.com/example/ec-event-driven/internal/command"
 	"github.com/example/ec-event-driven/internal/domain/cart"
 	"github.com/example/ec-event-driven/internal/domain/inventory"
 	"github.com/example/ec-event-driven/internal/domain/order"
 	"github.com/example/ec-event-driven/internal/domain/product"
+	"github.com/example/ec-event-driven/internal/domain/category"
+	"github.com/example/ec-event-driven/internal/domain/user"
 	"github.com/example/ec-event-driven/internal/infrastructure/kafka"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/projection"
@@ -32,6 +35,7 @@ func main() {
 	kafkaBrokers := strings.Split(kafkaBrokersStr, ",")
 	kafkaTopic := getEnv("KAFKA_TOPIC", "ec-events")
 	postgresConnStr := getEnv("DATABASE_URL", "postgres://ecapp:ecapp@localhost:5432/ecapp?sslmode=disable")
+	jwtSecret := getEnv("JWT_SECRET", "your-super-secret-key-change-in-production")
 
 	log.Println("[API] ========================================")
 	log.Println("[API] EC Shop - CQRS Mode")
@@ -62,6 +66,15 @@ func main() {
 	cartSvc := cart.NewService(eventStore)
 	orderSvc := order.NewService(eventStore)
 	inventorySvc := inventory.NewService(eventStore)
+	userSvc := user.NewService(eventStore)
+	categorySvc := category.NewService(eventStore)
+
+	// Initialize JWT service
+	jwtService := auth.NewJWTService(
+		jwtSecret,
+		15*time.Minute,  // Access token expiry
+		7*24*time.Hour,  // Refresh token expiry (7 days)
+	)
 
 	// Initialize handlers
 	cmdHandler := command.NewHandler(productSvc, cartSvc, orderSvc, inventorySvc, readStore)
@@ -102,8 +115,14 @@ func main() {
 
 	// Initialize API
 	handlers := api.NewHandlers(cmdHandler, queryHandler)
-	webDir := getEnv("WEB_DIR", "./web")
-	router := api.NewRouter(handlers, webDir)
+	authHandlers := api.NewAuthHandlers(userSvc, jwtService, readStore)
+	categoryHandlers := api.NewCategoryHandlers(categorySvc, readStore)
+	router := api.NewRouter(api.RouterConfig{
+		Handlers:         handlers,
+		AuthHandlers:     authHandlers,
+		CategoryHandlers: categoryHandlers,
+		JWTService:       jwtService,
+	})
 
 	// Start HTTP server
 	server := &http.Server{

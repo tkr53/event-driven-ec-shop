@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/example/ec-event-driven/internal/api/middleware"
 	"github.com/example/ec-event-driven/internal/command"
 	"github.com/example/ec-event-driven/internal/query"
 )
@@ -54,13 +55,40 @@ func (h *Handlers) GetProduct(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, product)
 }
 
+func (h *Handlers) UpdateProduct(w http.ResponseWriter, r *http.Request) {
+	id := extractPathParam(r.URL.Path, "/products/")
+
+	var cmd command.UpdateProduct
+	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	cmd.ProductID = id
+
+	if err := h.cmdHandler.UpdateProduct(r.Context(), cmd); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "Product updated"})
+}
+
+func (h *Handlers) DeleteProduct(w http.ResponseWriter, r *http.Request) {
+	id := extractPathParam(r.URL.Path, "/products/")
+
+	cmd := command.DeleteProduct{ProductID: id}
+	if err := h.cmdHandler.DeleteProduct(r.Context(), cmd); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "Product deleted"})
+}
+
 // Cart Handlers
 
 func (h *Handlers) AddToCart(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
-		userID = "default-user"
-	}
+	userID := getUserID(r)
 
 	var req struct {
 		ProductID string `json:"product_id"`
@@ -85,11 +113,7 @@ func (h *Handlers) AddToCart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) RemoveFromCart(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
-		userID = "default-user"
-	}
-
+	userID := getUserID(r)
 	productID := extractPathParam(r.URL.Path, "/cart/items/")
 	cmd := command.RemoveFromCart{
 		UserID:    userID,
@@ -104,11 +128,7 @@ func (h *Handlers) RemoveFromCart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) GetCart(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
-		userID = "default-user"
-	}
-
+	userID := getUserID(r)
 	cart, _ := h.queryHandler.GetCart(userID)
 	respondJSON(w, http.StatusOK, cart)
 }
@@ -116,11 +136,7 @@ func (h *Handlers) GetCart(w http.ResponseWriter, r *http.Request) {
 // Order Handlers
 
 func (h *Handlers) PlaceOrder(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
-		userID = "default-user"
-	}
-
+	userID := getUserID(r)
 	cmd := command.PlaceOrder{UserID: userID}
 	order, err := h.cmdHandler.PlaceOrder(r.Context(), cmd)
 	if err != nil {
@@ -132,11 +148,7 @@ func (h *Handlers) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) GetOrders(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
-		userID = "default-user"
-	}
-
+	userID := getUserID(r)
 	orders := h.queryHandler.ListOrdersByUser(userID)
 	respondJSON(w, http.StatusOK, orders)
 }
@@ -175,6 +187,13 @@ func (h *Handlers) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// Admin Handlers
+
+func (h *Handlers) GetAllOrders(w http.ResponseWriter, r *http.Request) {
+	orders := h.queryHandler.ListAllOrders()
+	respondJSON(w, http.StatusOK, orders)
+}
+
 // Helper functions
 
 func respondJSON(w http.ResponseWriter, status int, data any) {
@@ -185,4 +204,19 @@ func respondJSON(w http.ResponseWriter, status int, data any) {
 
 func extractPathParam(path, prefix string) string {
 	return strings.TrimPrefix(path, prefix)
+}
+
+// getUserID extracts user ID from JWT context or falls back to X-User-ID header
+func getUserID(r *http.Request) string {
+	// First try to get from JWT context
+	if userID := middleware.GetUserID(r.Context()); userID != "" {
+		return userID
+	}
+
+	// Fall back to X-User-ID header for backward compatibility
+	if userID := r.Header.Get("X-User-ID"); userID != "" {
+		return userID
+	}
+
+	return "default-user"
 }

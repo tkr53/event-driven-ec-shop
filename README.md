@@ -330,11 +330,22 @@ make logs
 
 | サービス | URL / Port | 説明 |
 |---------|------------|------|
-| **EC Shop UI** | http://localhost:8080 | Webフロントエンド |
-| **API Server** | http://localhost:8080/products | REST API（Command + Query） |
+| **EC Shop UI** | http://localhost:3000 | Next.js フロントエンド |
+| **API Server** | http://localhost:8080 | REST API（Command + Query） |
 | **Projector** | - | Kafkaコンシューマー（Read DB更新） |
 | **Kafka UI** | http://localhost:8081 | Kafkaモニタリング |
 | **PostgreSQL** | localhost:5432 | Write DB + Read DB |
+
+### 初期管理者アカウント
+
+| 項目 | 値 |
+|------|-----|
+| メール | `admin@example.com` |
+| パスワード | `admin123` |
+
+管理画面（http://localhost:3000/admin）にアクセスするには、上記アカウントでログインしてください。
+
+**注意:** 本番環境ではパスワードを変更してください。
 
 ### 停止・クリーンアップ
 
