@@ -167,3 +167,19 @@ CREATE TABLE IF NOT EXISTS product_categories (
 
 CREATE INDEX idx_product_categories_product ON product_categories(product_id);
 CREATE INDEX idx_product_categories_category ON product_categories(category_id);
+
+-- ============================================
+-- Initial Admin User
+-- ============================================
+-- Password: admin123 (bcrypt hash with cost 12)
+INSERT INTO read_users (id, email, password_hash, name, role, is_active, created_at, updated_at)
+VALUES (
+    'admin-00000000-0000-0000-0000-000000000001',
+    'admin@example.com',
+    '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.V4f.u.VJBvKWGa',
+    'Administrator',
+    'admin',
+    true,
+    NOW(),
+    NOW()
+) ON CONFLICT (email) DO NOTHING;

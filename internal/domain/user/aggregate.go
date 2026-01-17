@@ -44,6 +44,16 @@ func NewService(es store.EventStoreInterface) *Service {
 
 // Register creates a new user
 func (s *Service) Register(ctx context.Context, email, password, name string) (*User, error) {
+	return s.RegisterWithRole(ctx, email, password, name, "customer")
+}
+
+// RegisterAdmin creates a new admin user
+func (s *Service) RegisterAdmin(ctx context.Context, email, password, name string) (*User, error) {
+	return s.RegisterWithRole(ctx, email, password, name, "admin")
+}
+
+// RegisterWithRole creates a new user with a specific role
+func (s *Service) RegisterWithRole(ctx context.Context, email, password, name, role string) (*User, error) {
 	if email == "" {
 		return nil, ErrInvalidEmail
 	}
@@ -64,7 +74,7 @@ func (s *Service) Register(ctx context.Context, email, password, name string) (*
 		Email:        email,
 		PasswordHash: passwordHash,
 		Name:         name,
-		Role:         "customer",
+		Role:         role,
 		CreatedAt:    now,
 	}
 
@@ -77,7 +87,7 @@ func (s *Service) Register(ctx context.Context, email, password, name string) (*
 		ID:        userID,
 		Email:     email,
 		Name:      name,
-		Role:      "customer",
+		Role:      role,
 		IsActive:  true,
 		CreatedAt: now,
 	}, nil
