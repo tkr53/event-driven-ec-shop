@@ -6,6 +6,7 @@ import type {
   ChangePasswordRequest,
   Product,
   CreateProductRequest,
+  UpdateProductRequest,
   Category,
   CreateCategoryRequest,
   Cart,
@@ -108,6 +109,19 @@ class ApiClient {
     });
   }
 
+  async updateProduct(id: string, data: UpdateProductRequest): Promise<MessageResponse> {
+    return this.request<MessageResponse>(`/products/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProduct(id: string): Promise<MessageResponse> {
+    return this.request<MessageResponse>(`/products/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   async searchProducts(params: SearchProductsParams): Promise<Product[]> {
     const searchParams = new URLSearchParams();
     if (params.q) searchParams.set('q', params.q);
@@ -190,6 +204,11 @@ class ApiClient {
     return this.request<MessageResponse>(`/orders/${id}/cancel`, {
       method: 'POST',
     });
+  }
+
+  // Admin endpoints
+  async getAllOrders(): Promise<Order[]> {
+    return this.request<Order[]>('/api/admin/orders');
   }
 }
 

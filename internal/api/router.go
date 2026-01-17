@@ -96,6 +96,18 @@ func NewRouter(config RouterConfig) http.Handler {
 		switch r.Method {
 		case http.MethodGet:
 			config.Handlers.GetProduct(w, r)
+		case http.MethodPut:
+			middleware.AuthMiddleware(config.JWTService)(
+				middleware.RequireRole("admin")(
+					http.HandlerFunc(config.Handlers.UpdateProduct),
+				),
+			).ServeHTTP(w, r)
+		case http.MethodDelete:
+			middleware.AuthMiddleware(config.JWTService)(
+				middleware.RequireRole("admin")(
+					http.HandlerFunc(config.Handlers.DeleteProduct),
+				),
+			).ServeHTTP(w, r)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -217,6 +229,19 @@ func NewRouter(config RouterConfig) http.Handler {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+
+	// Admin routes
+	mux.Handle("/api/admin/orders", middleware.AuthMiddleware(config.JWTService)(
+		middleware.RequireRole("admin")(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					config.Handlers.GetAllOrders(w, r)
+				} else {
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+			}),
+		),
+	))
 
 	return withCORS(withLogging(mux))
 }

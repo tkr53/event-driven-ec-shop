@@ -51,6 +51,12 @@ export interface CreateProductRequest {
   stock: number;
 }
 
+export interface UpdateProductRequest {
+  name: string;
+  description: string;
+  price: number;
+}
+
 // Category types
 export interface Category {
   id: string;

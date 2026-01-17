@@ -55,6 +55,36 @@ func (h *Handlers) GetProduct(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, product)
 }
 
+func (h *Handlers) UpdateProduct(w http.ResponseWriter, r *http.Request) {
+	id := extractPathParam(r.URL.Path, "/products/")
+
+	var cmd command.UpdateProduct
+	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	cmd.ProductID = id
+
+	if err := h.cmdHandler.UpdateProduct(r.Context(), cmd); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "Product updated"})
+}
+
+func (h *Handlers) DeleteProduct(w http.ResponseWriter, r *http.Request) {
+	id := extractPathParam(r.URL.Path, "/products/")
+
+	cmd := command.DeleteProduct{ProductID: id}
+	if err := h.cmdHandler.DeleteProduct(r.Context(), cmd); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "Product deleted"})
+}
+
 // Cart Handlers
 
 func (h *Handlers) AddToCart(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +185,13 @@ func (h *Handlers) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// Admin Handlers
+
+func (h *Handlers) GetAllOrders(w http.ResponseWriter, r *http.Request) {
+	orders := h.queryHandler.ListAllOrders()
+	respondJSON(w, http.StatusOK, orders)
 }
 
 // Helper functions
