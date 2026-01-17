@@ -16,6 +16,7 @@ COPY . .
 # Build binaries
 RUN CGO_ENABLED=0 GOOS=linux go build -o /api ./cmd/api
 RUN CGO_ENABLED=0 GOOS=linux go build -o /projector ./cmd/projector
+RUN CGO_ENABLED=0 GOOS=linux go build -o /notifier ./cmd/notifier
 
 # API image
 FROM alpine:3.19 AS api
@@ -36,3 +37,12 @@ RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /projector /projector
 
 CMD ["/projector"]
+
+# Notifier image
+FROM alpine:3.19 AS notifier
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /notifier /notifier
+
+CMD ["/notifier"]

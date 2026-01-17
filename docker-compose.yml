@@ -37,6 +37,13 @@ services:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
 
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -84,6 +91,26 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    restart: unless-stopped
+
+  notifier:
+    build:
+      context: .
+      target: notifier
+    environment:
+      DATABASE_URL: postgres://ecapp:ecapp@postgres:5432/ecapp?sslmode=disable
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_TOPIC: ec-events
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM: noreply@example.com
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
     restart: unless-stopped
 
   frontend:
