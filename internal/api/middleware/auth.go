@@ -1,0 +1,115 @@
+package middleware
+
+import (
+	"context"
+	"net/http"
+	"strings"
+
+	"github.com/example/ec-event-driven/internal/auth"
+)
+
+type contextKey string
+
+const (
+	UserContextKey contextKey = "user"
+)
+
+// AuthMiddleware validates JWT tokens and adds user claims to context
+func AuthMiddleware(jwtService *auth.JWTService) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var tokenString string
+
+			// Try cookie first (for browser)
+			cookie, err := r.Cookie("access_token")
+			if err == nil {
+				tokenString = cookie.Value
+			} else {
+				// Fall back to Authorization header (for API clients)
+				authHeader := r.Header.Get("Authorization")
+				if strings.HasPrefix(authHeader, "Bearer ") {
+					tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+				}
+			}
+
+			if tokenString == "" {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+
+			claims, err := jwtService.ValidateAccessToken(tokenString)
+			if err != nil {
+				http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), UserContextKey, claims)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// OptionalAuthMiddleware adds user claims to context if token is present, but doesn't require it
+func OptionalAuthMiddleware(jwtService *auth.JWTService) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var tokenString string
+
+			cookie, err := r.Cookie("access_token")
+			if err == nil {
+				tokenString = cookie.Value
+			} else {
+				authHeader := r.Header.Get("Authorization")
+				if strings.HasPrefix(authHeader, "Bearer ") {
+					tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+				}
+			}
+
+			if tokenString != "" {
+				if claims, err := jwtService.ValidateAccessToken(tokenString); err == nil {
+					ctx := context.WithValue(r.Context(), UserContextKey, claims)
+					r = r.WithContext(ctx)
+				}
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireRole checks if the user has one of the required roles
+func RequireRole(roles ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := r.Context().Value(UserContextKey).(*auth.Claims)
+			if !ok {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+
+			for _, role := range roles {
+				if claims.Role == role {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		})
+	}
+}
+
+// GetUserFromContext retrieves user claims from the request context
+func GetUserFromContext(ctx context.Context) (*auth.Claims, bool) {
+	claims, ok := ctx.Value(UserContextKey).(*auth.Claims)
+	return claims, ok
+}
+
+// GetUserID is a helper to get just the user ID from context
+func GetUserID(ctx context.Context) string {
+	claims, ok := GetUserFromContext(ctx)
+	if !ok {
+		return ""
+	}
+	return claims.UserID
+}

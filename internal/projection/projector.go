@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/example/ec-event-driven/internal/domain/cart"
+	"github.com/example/ec-event-driven/internal/domain/category"
 	"github.com/example/ec-event-driven/internal/domain/inventory"
 	"github.com/example/ec-event-driven/internal/domain/order"
 	"github.com/example/ec-event-driven/internal/domain/product"
+	"github.com/example/ec-event-driven/internal/domain/user"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/readmodel"
 )
@@ -39,6 +41,10 @@ func (p *Projector) HandleEvent(ctx context.Context, key, value []byte) error {
 		return p.handleOrderEvent(event)
 	case inventory.AggregateType:
 		return p.handleInventoryEvent(event)
+	case user.AggregateType:
+		return p.handleUserEvent(event)
+	case category.AggregateType:
+		return p.handleCategoryEvent(event)
 	}
 
 	return nil
@@ -81,6 +87,37 @@ func (p *Projector) handleProductEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Delete("products", e.ProductID)
+
+	case product.EventProductCategoryAssigned:
+		var e product.ProductCategoryAssigned
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		// Use type assertion to access PostgresReadStore methods
+		if pgStore, ok := p.readStore.(*store.PostgresReadStore); ok {
+			pgStore.AddProductCategory(e.ProductID, e.CategoryID)
+		}
+
+	case product.EventProductCategoryRemoved:
+		var e product.ProductCategoryRemoved
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		if pgStore, ok := p.readStore.(*store.PostgresReadStore); ok {
+			pgStore.RemoveProductCategory(e.ProductID, e.CategoryID)
+		}
+
+	case product.EventProductImageUpdated:
+		var e product.ProductImageUpdated
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		p.readStore.Update("products", e.ProductID, func(current any) any {
+			prod := current.(*readmodel.ProductReadModel)
+			prod.ImageURL = e.ImageURL
+			prod.UpdatedAt = e.UpdatedAt
+			return prod
+		})
 	}
 
 	return nil
@@ -325,4 +362,126 @@ func calculateCartTotal(items []readmodel.CartItemReadModel) int {
 		total += item.Price * item.Quantity
 	}
 	return total
+}
+
+func (p *Projector) handleUserEvent(event store.Event) error {
+	switch event.EventType {
+	case user.EventUserCreated:
+		var e user.UserCreated
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		p.readStore.Set("users", e.UserID, &readmodel.UserReadModel{
+			ID:           e.UserID,
+			Email:        e.Email,
+			PasswordHash: e.PasswordHash,
+			Name:         e.Name,
+			Role:         e.Role,
+			IsActive:     true,
+			CreatedAt:    e.CreatedAt,
+			UpdatedAt:    e.CreatedAt,
+		})
+
+	case user.EventUserUpdated:
+		var e user.UserUpdated
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		p.readStore.Update("users", e.UserID, func(current any) any {
+			u := current.(*readmodel.UserReadModel)
+			u.Name = e.Name
+			u.UpdatedAt = e.UpdatedAt
+			return u
+		})
+
+	case user.EventUserPasswordChanged:
+		var e user.UserPasswordChanged
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		p.readStore.Update("users", e.UserID, func(current any) any {
+			u := current.(*readmodel.UserReadModel)
+			u.PasswordHash = e.PasswordHash
+			u.UpdatedAt = e.ChangedAt
+			return u
+		})
+
+	case user.EventUserDeactivated:
+		var e user.UserDeactivated
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		p.readStore.Update("users", e.UserID, func(current any) any {
+			u := current.(*readmodel.UserReadModel)
+			u.IsActive = false
+			u.UpdatedAt = e.DeactivatedAt
+			return u
+		})
+
+	case user.EventUserActivated:
+		var e user.UserActivated
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		p.readStore.Update("users", e.UserID, func(current any) any {
+			u := current.(*readmodel.UserReadModel)
+			u.IsActive = true
+			u.UpdatedAt = e.ActivatedAt
+			return u
+		})
+	}
+
+	return nil
+}
+
+func (p *Projector) handleCategoryEvent(event store.Event) error {
+	switch event.EventType {
+	case category.EventCategoryCreated:
+		var e category.CategoryCreated
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		p.readStore.Set("categories", e.CategoryID, &readmodel.CategoryReadModel{
+			ID:          e.CategoryID,
+			Name:        e.Name,
+			Slug:        e.Slug,
+			Description: e.Description,
+			ParentID:    e.ParentID,
+			SortOrder:   e.SortOrder,
+			IsActive:    true,
+			CreatedAt:   e.CreatedAt,
+			UpdatedAt:   e.CreatedAt,
+		})
+
+	case category.EventCategoryUpdated:
+		var e category.CategoryUpdated
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		p.readStore.Update("categories", e.CategoryID, func(current any) any {
+			c := current.(*readmodel.CategoryReadModel)
+			c.Name = e.Name
+			c.Slug = e.Slug
+			c.Description = e.Description
+			c.ParentID = e.ParentID
+			c.SortOrder = e.SortOrder
+			c.UpdatedAt = e.UpdatedAt
+			return c
+		})
+
+	case category.EventCategoryDeleted:
+		var e category.CategoryDeleted
+		if err := json.Unmarshal(event.Data, &e); err != nil {
+			return err
+		}
+		// Soft delete by marking as inactive
+		p.readStore.Update("categories", e.CategoryID, func(current any) any {
+			c := current.(*readmodel.CategoryReadModel)
+			c.IsActive = false
+			c.UpdatedAt = e.DeletedAt
+			return c
+		})
+	}
+
+	return nil
 }
