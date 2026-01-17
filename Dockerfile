@@ -23,9 +23,6 @@ FROM alpine:3.19 AS api
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /api /api
-COPY --from=builder /app/web /web
-
-ENV WEB_DIR=/web
 
 EXPOSE 8080
 
