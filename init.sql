@@ -176,7 +176,7 @@ INSERT INTO read_users (id, email, password_hash, name, role, is_active, created
 VALUES (
     'admin-00000000-0000-0000-0000-000000000001',
     'admin@example.com',
-    '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.V4f.u.VJBvKWGa',
+    '$2a$12$EG4mxT0VuwfDNwqLyp0hv.Jeyt/ZRGarO7k2xA8s7qeo13Mphj0FS',
     'Administrator',
     'admin',
     true,
