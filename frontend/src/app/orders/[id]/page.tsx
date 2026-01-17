@@ -17,12 +17,28 @@ export default function OrderDetailPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    // 1. sessionStorageから初期データを取得（Optimistic UI）
+    const cached = sessionStorage.getItem(`order_${orderId}`);
+    if (cached) {
+      try {
+        setOrder(JSON.parse(cached));
+        setIsLoading(false);
+      } catch {
+        // パースエラーは無視
+      }
+    }
+
+    // 2. バックグラウンドでRead Storeからリトライ取得
     const fetchOrder = async () => {
       try {
-        const data = await api.getOrder(orderId);
+        const data = await api.getOrderWithRetry(orderId);
         setOrder(data);
+        sessionStorage.removeItem(`order_${orderId}`); // キャッシュ削除
       } catch (err) {
-        setError(err instanceof Error ? err.message : '注文の取得に失敗しました');
+        // sessionStorageにデータがなければエラー表示
+        if (!cached) {
+          setError(err instanceof Error ? err.message : '注文の取得に失敗しました');
+        }
       } finally {
         setIsLoading(false);
       }

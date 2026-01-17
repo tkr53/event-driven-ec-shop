@@ -44,6 +44,8 @@ export default function CartPage() {
 
     try {
       const order = await api.placeOrder();
+      // 注文データをsessionStorageに一時保存（Optimistic UI用）
+      sessionStorage.setItem(`order_${order.id}`, JSON.stringify(order));
       router.push(`/orders/${order.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '注文に失敗しました');

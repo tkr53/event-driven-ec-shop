@@ -194,6 +194,18 @@ class ApiClient {
     return this.request<Order>(`/orders/${id}`);
   }
 
+  async getOrderWithRetry(id: string, maxRetries = 5): Promise<Order> {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await this.getOrder(id);
+      } catch (error) {
+        if (i === maxRetries - 1) throw error;
+        await new Promise(r => setTimeout(r, 200 * Math.pow(2, i))); // 200ms, 400ms, 800ms...
+      }
+    }
+    throw new Error('Order not found');
+  }
+
   async placeOrder(): Promise<Order> {
     return this.request<Order>('/orders', {
       method: 'POST',
