@@ -27,13 +27,13 @@ func NewHandlers(cmdHandler *command.Handler, queryHandler *query.Handler) *Hand
 func (h *Handlers) CreateProduct(w http.ResponseWriter, r *http.Request) {
 	var cmd command.CreateProduct
 	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	product, err := h.cmdHandler.CreateProduct(r.Context(), cmd)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to create product", http.StatusInternalServerError)
 		return
 	}
 
@@ -60,13 +60,13 @@ func (h *Handlers) UpdateProduct(w http.ResponseWriter, r *http.Request) {
 
 	var cmd command.UpdateProduct
 	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 	cmd.ProductID = id
 
 	if err := h.cmdHandler.UpdateProduct(r.Context(), cmd); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to update product", http.StatusInternalServerError)
 		return
 	}
 
@@ -78,7 +78,7 @@ func (h *Handlers) DeleteProduct(w http.ResponseWriter, r *http.Request) {
 
 	cmd := command.DeleteProduct{ProductID: id}
 	if err := h.cmdHandler.DeleteProduct(r.Context(), cmd); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to delete product", http.StatusInternalServerError)
 		return
 	}
 
@@ -219,7 +219,7 @@ func (h *Handlers) CancelOrder(w http.ResponseWriter, r *http.Request) {
 		Reason:  req.Reason,
 	}
 	if err := h.cmdHandler.CancelOrder(r.Context(), cmd); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to cancel order", http.StatusInternalServerError)
 		return
 	}
 

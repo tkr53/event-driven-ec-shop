@@ -266,12 +266,24 @@ func NewRouter(config RouterConfig) http.Handler {
 		),
 	))
 
-	return withCORS(withLogging(mux))
+	return withCORS(withBodyLimit(withLogging(mux)))
 }
 
 func withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		println("[API]", r.Method, r.URL.Path)
+		log.Printf("[API] %s %s", r.Method, r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// withBodyLimit limits the request body size to prevent memory exhaustion attacks
+const maxBodySize = 1 << 20 // 1MB
+
+func withBodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		}
 		next.ServeHTTP(w, r)
 	})
 }

@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/auth"
@@ -12,13 +13,24 @@ import (
 
 const AggregateType = "User"
 
+// emailRegex validates email format (RFC 5322 simplified)
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
 var (
 	ErrUserNotFound       = errors.New("user not found")
-	ErrInvalidEmail       = errors.New("email is required")
+	ErrInvalidEmail       = errors.New("invalid email format")
 	ErrInvalidName        = errors.New("name is required")
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrUserDeactivated    = errors.New("user account is deactivated")
 )
+
+// isValidEmail checks if the email format is valid
+func isValidEmail(email string) bool {
+	if len(email) > 254 { // RFC 5321
+		return false
+	}
+	return emailRegex.MatchString(email)
+}
 
 // User represents a user aggregate
 type User struct {
@@ -54,7 +66,7 @@ func (s *Service) RegisterAdmin(ctx context.Context, email, password, name strin
 
 // RegisterWithRole creates a new user with a specific role
 func (s *Service) RegisterWithRole(ctx context.Context, email, password, name, role string) (*User, error) {
-	if email == "" {
+	if !isValidEmail(email) {
 		return nil, ErrInvalidEmail
 	}
 	if name == "" {

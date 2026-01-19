@@ -3,6 +3,7 @@ package order
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
@@ -21,9 +22,13 @@ const (
 )
 
 var (
-	ErrOrderNotFound  = errors.New("order not found")
-	ErrEmptyOrder     = errors.New("order must have at least one item")
-	ErrInvalidStatus  = errors.New("invalid order status transition")
+	ErrOrderNotFound      = errors.New("order not found")
+	ErrEmptyOrder         = errors.New("order must have at least one item")
+	ErrInvalidStatus      = errors.New("invalid order status transition")
+	ErrOrderAlreadyPaid   = errors.New("order is already paid")
+	ErrOrderNotPaid       = errors.New("order must be paid before shipping")
+	ErrOrderShipped       = errors.New("cannot cancel shipped order")
+	ErrOrderCancelled     = errors.New("order is already cancelled")
 )
 
 type Order struct {
@@ -42,6 +47,24 @@ type Service struct {
 
 func NewService(es store.EventStoreInterface) *Service {
 	return &Service{eventStore: es}
+}
+
+// rebuildStatus reconstructs the current order status from events
+func (s *Service) rebuildStatus(events []store.Event) Status {
+	status := StatusPending
+	for _, event := range events {
+		switch event.EventType {
+		case EventOrderPlaced:
+			status = StatusPending
+		case EventOrderPaid:
+			status = StatusPaid
+		case EventOrderShipped:
+			status = StatusShipped
+		case EventOrderCancelled:
+			status = StatusCancelled
+		}
+	}
+	return status
 }
 
 func (s *Service) Place(ctx context.Context, userID string, items []OrderItem) (*Order, error) {
@@ -86,6 +109,21 @@ func (s *Service) Pay(ctx context.Context, orderID string) error {
 		return ErrOrderNotFound
 	}
 
+	// Validate current status
+	currentStatus := s.rebuildStatus(events)
+	switch currentStatus {
+	case StatusPending:
+		// Valid transition
+	case StatusPaid:
+		return ErrOrderAlreadyPaid
+	case StatusShipped:
+		return ErrOrderAlreadyPaid
+	case StatusCancelled:
+		return ErrOrderCancelled
+	default:
+		return fmt.Errorf("%w: cannot pay order in %s status", ErrInvalidStatus, currentStatus)
+	}
+
 	event := OrderPaid{
 		OrderID: orderID,
 		PaidAt:  time.Now(),
@@ -101,6 +139,21 @@ func (s *Service) Ship(ctx context.Context, orderID string) error {
 		return ErrOrderNotFound
 	}
 
+	// Validate current status - can only ship paid orders
+	currentStatus := s.rebuildStatus(events)
+	switch currentStatus {
+	case StatusPaid:
+		// Valid transition
+	case StatusPending:
+		return ErrOrderNotPaid
+	case StatusShipped:
+		return fmt.Errorf("%w: order is already shipped", ErrInvalidStatus)
+	case StatusCancelled:
+		return ErrOrderCancelled
+	default:
+		return fmt.Errorf("%w: cannot ship order in %s status", ErrInvalidStatus, currentStatus)
+	}
+
 	event := OrderShipped{
 		OrderID:   orderID,
 		ShippedAt: time.Now(),
@@ -114,6 +167,19 @@ func (s *Service) Cancel(ctx context.Context, orderID, reason string) error {
 	events := s.eventStore.GetEvents(orderID)
 	if len(events) == 0 {
 		return ErrOrderNotFound
+	}
+
+	// Validate current status - cannot cancel shipped orders
+	currentStatus := s.rebuildStatus(events)
+	switch currentStatus {
+	case StatusPending, StatusPaid:
+		// Valid - can cancel pending or paid orders (with refund if paid)
+	case StatusShipped:
+		return ErrOrderShipped
+	case StatusCancelled:
+		return ErrOrderCancelled
+	default:
+		return fmt.Errorf("%w: cannot cancel order in %s status", ErrInvalidStatus, currentStatus)
 	}
 
 	event := OrderCancelled{
