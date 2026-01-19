@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { register } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -33,9 +34,11 @@ export default function RegisterPage() {
 
     try {
       await register(email, password, name);
-      router.push('/');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '登録に失敗しました');
+      // Redirect to the specified URL or home page
+      const redirect = searchParams.get('redirect') || '/';
+      router.push(redirect);
+    } catch {
+      setError('登録に失敗しました');
     } finally {
       setIsLoading(false);
     }
@@ -50,7 +53,10 @@ export default function RegisterPage() {
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
             すでにアカウントをお持ちですか？{' '}
-            <Link href="/login" className="text-blue-600 dark:text-blue-400 hover:text-blue-500">
+            <Link
+              href={searchParams.get('redirect') ? `/login?redirect=${encodeURIComponent(searchParams.get('redirect')!)}` : '/login'}
+              className="text-blue-600 dark:text-blue-400 hover:text-blue-500"
+            >
               ログイン
             </Link>
           </p>

@@ -2,28 +2,40 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Order } from '@/types';
 
 export default function OrdersPage() {
+  const router = useRouter();
+  const { user, isLoading: authLoading } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    // Redirect to login if not authenticated
+    if (!authLoading && !user) {
+      router.push('/login?redirect=/orders');
+      return;
+    }
+
     const fetchOrders = async () => {
       try {
         const data = await api.getOrders();
         setOrders(data || []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '注文履歴の取得に失敗しました');
+      } catch {
+        setError('注文履歴の取得に失敗しました');
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchOrders();
-  }, []);
+    if (user) {
+      fetchOrders();
+    }
+  }, [user, authLoading, router]);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('ja-JP', {
@@ -62,7 +74,7 @@ export default function OrdersPage() {
     );
   };
 
-  if (isLoading) {
+  if (authLoading || isLoading) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="flex justify-center py-12">
@@ -70,6 +82,11 @@ export default function OrdersPage() {
         </div>
       </div>
     );
+  }
+
+  // Show nothing while redirecting
+  if (!user) {
+    return null;
   }
 
   if (error) {

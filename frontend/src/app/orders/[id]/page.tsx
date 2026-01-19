@@ -4,11 +4,13 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Order } from '@/types';
 
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { user, isLoading: authLoading } = useAuth();
   const orderId = params.id as string;
 
   const [order, setOrder] = useState<Order | null>(null);
@@ -17,6 +19,14 @@ export default function OrderDetailPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    // Redirect to login if not authenticated
+    if (!authLoading && !user) {
+      router.push(`/login?redirect=/orders/${orderId}`);
+      return;
+    }
+
+    if (!user) return;
+
     // 1. sessionStorageから初期データを取得（Optimistic UI）
     const cached = sessionStorage.getItem(`order_${orderId}`);
     if (cached) {
@@ -34,10 +44,10 @@ export default function OrderDetailPage() {
         const data = await api.getOrderWithRetry(orderId);
         setOrder(data);
         sessionStorage.removeItem(`order_${orderId}`); // キャッシュ削除
-      } catch (err) {
+      } catch {
         // sessionStorageにデータがなければエラー表示
         if (!cached) {
-          setError(err instanceof Error ? err.message : '注文の取得に失敗しました');
+          setError('注文の取得に失敗しました');
         }
       } finally {
         setIsLoading(false);
@@ -45,7 +55,7 @@ export default function OrderDetailPage() {
     };
 
     fetchOrder();
-  }, [orderId]);
+  }, [orderId, user, authLoading, router]);
 
   const handleCancelOrder = async () => {
     if (!confirm('この注文をキャンセルしますか？')) return;
@@ -55,8 +65,8 @@ export default function OrderDetailPage() {
       await api.cancelOrder(orderId);
       const data = await api.getOrder(orderId);
       setOrder(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '注文のキャンセルに失敗しました');
+    } catch {
+      setError('注文のキャンセルに失敗しました');
     } finally {
       setIsCancelling(false);
     }
@@ -99,7 +109,7 @@ export default function OrderDetailPage() {
     );
   };
 
-  if (isLoading) {
+  if (authLoading || isLoading) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="flex justify-center py-12">
@@ -107,6 +117,11 @@ export default function OrderDetailPage() {
         </div>
       </div>
     );
+  }
+
+  // Show nothing while redirecting
+  if (!user) {
+    return null;
   }
 
   if (error && !order) {

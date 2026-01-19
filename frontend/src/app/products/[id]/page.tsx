@@ -3,11 +3,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Product } from '@/types';
 
 export default function ProductDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { user } = useAuth();
   const productId = params.id as string;
 
   const [product, setProduct] = useState<Product | null>(null);
@@ -22,8 +24,8 @@ export default function ProductDetailPage() {
       try {
         const data = await api.getProduct(productId);
         setProduct(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '商品の取得に失敗しました');
+      } catch {
+        setError('商品の取得に失敗しました');
       } finally {
         setIsLoading(false);
       }
@@ -35,6 +37,12 @@ export default function ProductDetailPage() {
   const handleAddToCart = async () => {
     if (!product) return;
 
+    // Redirect to login if not authenticated
+    if (!user) {
+      router.push(`/login?redirect=/products/${productId}`);
+      return;
+    }
+
     setIsAddingToCart(true);
     setError('');
     setSuccessMessage('');
@@ -45,8 +53,8 @@ export default function ProductDetailPage() {
         quantity,
       });
       setSuccessMessage('カートに追加しました');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'カートへの追加に失敗しました');
+    } catch {
+      setError('カートへの追加に失敗しました');
     } finally {
       setIsAddingToCart(false);
     }
@@ -170,7 +178,7 @@ export default function ProductDetailPage() {
                 disabled={isAddingToCart}
                 className="w-full py-3 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isAddingToCart ? 'カートに追加中...' : 'カートに追加'}
+                {isAddingToCart ? 'カートに追加中...' : user ? 'カートに追加' : 'ログインしてカートに追加'}
               </button>
             </div>
           )}
