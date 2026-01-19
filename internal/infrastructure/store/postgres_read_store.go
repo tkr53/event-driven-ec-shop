@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -784,26 +785,26 @@ func (rs *PostgresReadStore) SearchProducts(params SearchProductsParams) []*read
 	// Join with product_categories if filtering by category
 	if params.CategoryID != "" {
 		query += ` INNER JOIN product_categories pc ON p.id = pc.product_id`
-		conditions = append(conditions, "pc.category_id = $"+string(rune('0'+argNum)))
+		conditions = append(conditions, "pc.category_id = $"+fmt.Sprintf("%d", argNum))
 		args = append(args, params.CategoryID)
 		argNum++
 	}
 
 	// Full-text search
 	if params.Query != "" {
-		conditions = append(conditions, "p.search_vector @@ plainto_tsquery('english', $"+string(rune('0'+argNum))+")")
+		conditions = append(conditions, "p.search_vector @@ plainto_tsquery('english', $"+fmt.Sprintf("%d", argNum)+")")
 		args = append(args, params.Query)
 		argNum++
 	}
 
 	// Price range filters
 	if params.MinPrice > 0 {
-		conditions = append(conditions, "p.price >= $"+string(rune('0'+argNum)))
+		conditions = append(conditions, "p.price >= $"+fmt.Sprintf("%d", argNum))
 		args = append(args, params.MinPrice)
 		argNum++
 	}
 	if params.MaxPrice > 0 {
-		conditions = append(conditions, "p.price <= $"+string(rune('0'+argNum)))
+		conditions = append(conditions, "p.price <= $"+fmt.Sprintf("%d", argNum))
 		args = append(args, params.MaxPrice)
 		argNum++
 	}

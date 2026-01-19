@@ -88,14 +88,17 @@ func (h *Handlers) DeleteProduct(w http.ResponseWriter, r *http.Request) {
 // Cart Handlers
 
 func (h *Handlers) AddToCart(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 
 	var req struct {
 		ProductID string `json:"product_id"`
 		Quantity  int    `json:"quantity"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -105,7 +108,7 @@ func (h *Handlers) AddToCart(w http.ResponseWriter, r *http.Request) {
 		Quantity:  req.Quantity,
 	}
 	if err := h.cmdHandler.AddToCart(r.Context(), cmd); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to add item to cart", http.StatusInternalServerError)
 		return
 	}
 
@@ -113,14 +116,18 @@ func (h *Handlers) AddToCart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) RemoveFromCart(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
 	productID := extractPathParam(r.URL.Path, "/cart/items/")
 	cmd := command.RemoveFromCart{
 		UserID:    userID,
 		ProductID: productID,
 	}
 	if err := h.cmdHandler.RemoveFromCart(r.Context(), cmd); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to remove item from cart", http.StatusInternalServerError)
 		return
 	}
 
@@ -128,7 +135,11 @@ func (h *Handlers) RemoveFromCart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) GetCart(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
 	cart, _ := h.queryHandler.GetCart(userID)
 	respondJSON(w, http.StatusOK, cart)
 }
@@ -136,11 +147,15 @@ func (h *Handlers) GetCart(w http.ResponseWriter, r *http.Request) {
 // Order Handlers
 
 func (h *Handlers) PlaceOrder(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
 	cmd := command.PlaceOrder{UserID: userID}
 	order, err := h.cmdHandler.PlaceOrder(r.Context(), cmd)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Failed to place order", http.StatusBadRequest)
 		return
 	}
 
@@ -148,7 +163,10 @@ func (h *Handlers) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) GetOrders(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	orders := h.queryHandler.ListOrdersByUser(userID)
 	respondJSON(w, http.StatusOK, orders)
 }
@@ -227,19 +245,30 @@ func extractPathParam(path, prefix string) string {
 	return strings.TrimPrefix(path, prefix)
 }
 
-// getUserID extracts user ID from JWT context or falls back to X-User-ID header
+// getUserID extracts user ID from JWT context or X-User-ID header for anonymous cart
 func getUserID(r *http.Request) string {
-	// First try to get from JWT context
+	// First try to get from JWT context (authenticated user)
 	if userID := middleware.GetUserID(r.Context()); userID != "" {
 		return userID
 	}
 
-	// Fall back to X-User-ID header for backward compatibility
+	// Fall back to X-User-ID header for anonymous cart functionality
+	// Client should generate a UUID for anonymous users
 	if userID := r.Header.Get("X-User-ID"); userID != "" {
 		return userID
 	}
 
-	return "default-user"
+	return ""
+}
+
+// requireUserID returns the user ID or sends an unauthorized response
+func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	userID := getUserID(r)
+	if userID == "" {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return "", false
+	}
+	return userID, true
 }
 
 // isAdmin checks if the current user has admin role

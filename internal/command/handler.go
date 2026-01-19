@@ -2,6 +2,8 @@ package command
 
 import (
 	"context"
+	"fmt"
+	"log"
 
 	"github.com/example/ec-event-driven/internal/domain/cart"
 	"github.com/example/ec-event-driven/internal/domain/inventory"
@@ -85,7 +87,7 @@ func (h *Handler) ClearCart(ctx context.Context, cmd ClearCart) error {
 	return h.cartSvc.Clear(ctx, cmd.UserID)
 }
 
-// PlaceOrder creates an order from cart
+// PlaceOrder creates an order from cart with stock validation and compensating transactions
 func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order, error) {
 	// Get cart from read store
 	cartID := cart.GetCartID(cmd.UserID)
@@ -105,6 +107,19 @@ func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order,
 		})
 	}
 
+	// Validate stock availability for all items before placing order
+	for _, item := range items {
+		inv, ok := h.readStore.Get("inventory", item.ProductID)
+		if !ok {
+			return nil, fmt.Errorf("inventory not found for product %s", item.ProductID)
+		}
+		invModel := inv.(*query.InventoryReadModel)
+		if invModel.AvailableStock < item.Quantity {
+			return nil, fmt.Errorf("%w: product %s has only %d available, requested %d",
+				inventory.ErrInsufficientStock, item.ProductID, invModel.AvailableStock, item.Quantity)
+		}
+	}
+
 	// Place order (emits OrderPlaced event)
 	o, err := h.orderSvc.Place(ctx, cmd.UserID, items)
 	if err != nil {
@@ -112,15 +127,29 @@ func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order,
 	}
 
 	// Reserve inventory for each item (emits StockReserved events)
+	// Track successfully reserved items for potential rollback
+	var reservedItems []order.OrderItem
 	for _, item := range items {
 		if err := h.inventorySvc.Reserve(ctx, item.ProductID, o.ID, item.Quantity); err != nil {
-			return nil, err
+			// Compensating transaction: release already reserved inventory
+			for _, reserved := range reservedItems {
+				if releaseErr := h.inventorySvc.Release(ctx, reserved.ProductID, o.ID, reserved.Quantity); releaseErr != nil {
+					log.Printf("[PlaceOrder] Failed to release inventory for product %s: %v", reserved.ProductID, releaseErr)
+				}
+			}
+			// Cancel the order
+			if cancelErr := h.orderSvc.Cancel(ctx, o.ID, "inventory reservation failed"); cancelErr != nil {
+				log.Printf("[PlaceOrder] Failed to cancel order %s: %v", o.ID, cancelErr)
+			}
+			return nil, fmt.Errorf("failed to reserve inventory for product %s: %w", item.ProductID, err)
 		}
+		reservedItems = append(reservedItems, item)
 	}
 
 	// Clear cart (emits CartCleared event)
+	// This is not critical - if it fails, user can manually clear
 	if err := h.cartSvc.Clear(ctx, cmd.UserID); err != nil {
-		return nil, err
+		log.Printf("[PlaceOrder] Failed to clear cart for user %s: %v", cmd.UserID, err)
 	}
 
 	return o, nil

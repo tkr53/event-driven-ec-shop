@@ -1,12 +1,35 @@
 package api
 
 import (
+	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/example/ec-event-driven/internal/api/middleware"
 	"github.com/example/ec-event-driven/internal/auth"
 )
+
+// allowedOrigins is a map of allowed CORS origins for O(1) lookup
+var allowedOrigins map[string]bool
+
+func init() {
+	// Initialize allowed origins from environment variable or use defaults
+	originsEnv := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if originsEnv == "" {
+		// Default allowed origins for development
+		originsEnv = "http://localhost:3000,http://localhost:8080"
+	}
+
+	allowedOrigins = make(map[string]bool)
+	for _, origin := range strings.Split(originsEnv, ",") {
+		origin = strings.TrimSpace(origin)
+		if origin != "" {
+			allowedOrigins[origin] = true
+		}
+	}
+	log.Printf("[API] CORS allowed origins: %v", allowedOrigins)
+}
 
 // RouterConfig holds the configuration for the router
 type RouterConfig struct {
@@ -255,14 +278,22 @@ func withLogging(next http.Handler) http.Handler {
 
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Allow credentials (cookies)
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID")
+		origin := r.Header.Get("Origin")
+
+		// Only set CORS headers if origin is in allowlist
+		if origin != "" && allowedOrigins[origin] {
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID")
+		}
 
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
+			if origin != "" && allowedOrigins[origin] {
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusForbidden)
+			}
 			return
 		}
 
