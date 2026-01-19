@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -108,6 +109,7 @@ func (h *Handlers) AddToCart(w http.ResponseWriter, r *http.Request) {
 		Quantity:  req.Quantity,
 	}
 	if err := h.cmdHandler.AddToCart(r.Context(), cmd); err != nil {
+		log.Printf("[API] AddToCart error: %v", err)
 		http.Error(w, "Failed to add item to cart", http.StatusInternalServerError)
 		return
 	}

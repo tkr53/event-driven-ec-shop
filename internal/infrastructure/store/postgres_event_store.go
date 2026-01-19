@@ -36,12 +36,13 @@ func (es *PostgresEventStore) Append(ctx context.Context, aggregateID, aggregate
 
 	// Use atomic INSERT ... SELECT to avoid race condition on version
 	// This calculates and inserts the version in a single operation
+	// Note: We use $7 for the WHERE clause to avoid PostgreSQL type inference issues
 	var version int
 	err = es.db.QueryRowContext(ctx,
 		`INSERT INTO events (id, aggregate_id, aggregate_type, event_type, data, version, created_at)
 		 SELECT $1, $2, $3, $4, $5, COALESCE(MAX(version), 0) + 1, $6
 		 FROM events
-		 WHERE aggregate_id = $2
+		 WHERE aggregate_id = $7
 		 RETURNING version`,
 		eventID,
 		aggregateID,
@@ -49,6 +50,7 @@ func (es *PostgresEventStore) Append(ctx context.Context, aggregateID, aggregate
 		eventType,
 		jsonData,
 		timestamp,
+		aggregateID, // $7 - duplicate for WHERE clause to avoid type inference issues
 	).Scan(&version)
 	if err != nil {
 		return nil, err
