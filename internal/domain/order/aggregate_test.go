@@ -2,6 +2,7 @@ package order
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/example/ec-event-driven/internal/infrastructure/store/mocks"
@@ -417,4 +418,68 @@ func TestOrderLifecycle_CancelAfterPay(t *testing.T) {
 	// 4. Cannot ship cancelled order
 	err = service.Ship(ctx, order.ID)
 	assert.ErrorIs(t, err, ErrOrderCancelled)
+}
+
+// ============================================
+// Error Path Tests
+// ============================================
+
+func TestService_Place_EventStoreError(t *testing.T) {
+	service, eventStore := newTestOrderService()
+	ctx := context.Background()
+
+	eventStore.AppendErr = errors.New("database error")
+
+	items := []OrderItem{
+		{ProductID: "prod-1", Quantity: 1, Price: 1000},
+	}
+
+	order, err := service.Place(ctx, "user-123", items)
+
+	assert.Error(t, err)
+	assert.Nil(t, order)
+}
+
+func TestService_Pay_EventStoreError(t *testing.T) {
+	service, eventStore := newTestOrderService()
+	ctx := context.Background()
+
+	orderID := "order-123"
+	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+
+	// Set error for next append
+	eventStore.AppendErr = errors.New("database error")
+
+	err := service.Pay(ctx, orderID)
+
+	assert.Error(t, err)
+}
+
+func TestService_Ship_EventStoreError(t *testing.T) {
+	service, eventStore := newTestOrderService()
+	ctx := context.Background()
+
+	orderID := "order-123"
+	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
+
+	eventStore.AppendErr = errors.New("database error")
+
+	err := service.Ship(ctx, orderID)
+
+	assert.Error(t, err)
+}
+
+func TestService_Cancel_EventStoreError(t *testing.T) {
+	service, eventStore := newTestOrderService()
+	ctx := context.Background()
+
+	orderID := "order-123"
+	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+
+	eventStore.AppendErr = errors.New("database error")
+
+	err := service.Cancel(ctx, orderID, "reason")
+
+	assert.Error(t, err)
 }

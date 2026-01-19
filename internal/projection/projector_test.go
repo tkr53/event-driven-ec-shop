@@ -642,6 +642,237 @@ func TestCalculateCartTotal(t *testing.T) {
 }
 
 // ============================================
+// Additional Product Event Tests
+// ============================================
+
+func TestProjector_HandleProductImageUpdated(t *testing.T) {
+	projector, readStore := newTestProjector()
+	ctx := context.Background()
+
+	readStore.SetData("products", "prod-123", &readmodel.ProductReadModel{
+		ID:       "prod-123",
+		Name:     "Test Product",
+		ImageURL: "",
+	})
+
+	eventData := product.ProductImageUpdated{
+		ProductID: "prod-123",
+		ImageURL:  "https://example.com/image.jpg",
+		UpdatedAt: time.Now(),
+	}
+
+	value := makeEvent(product.AggregateType, product.EventProductImageUpdated, eventData)
+
+	err := projector.HandleEvent(ctx, nil, value)
+
+	require.NoError(t, err)
+	data, _ := readStore.GetData("products", "prod-123")
+	prod := data.(*readmodel.ProductReadModel)
+	assert.Equal(t, "https://example.com/image.jpg", prod.ImageURL)
+}
+
+// ============================================
+// Additional User Event Tests
+// ============================================
+
+func TestProjector_HandleUserUpdated(t *testing.T) {
+	projector, readStore := newTestProjector()
+	ctx := context.Background()
+
+	readStore.SetData("users", "user-123", &readmodel.UserReadModel{
+		ID:   "user-123",
+		Name: "Old Name",
+	})
+
+	eventData := user.UserUpdated{
+		UserID:    "user-123",
+		Name:      "New Name",
+		UpdatedAt: time.Now(),
+	}
+
+	value := makeEvent(user.AggregateType, user.EventUserUpdated, eventData)
+
+	err := projector.HandleEvent(ctx, nil, value)
+
+	require.NoError(t, err)
+	data, _ := readStore.GetData("users", "user-123")
+	u := data.(*readmodel.UserReadModel)
+	assert.Equal(t, "New Name", u.Name)
+}
+
+func TestProjector_HandleUserPasswordChanged(t *testing.T) {
+	projector, readStore := newTestProjector()
+	ctx := context.Background()
+
+	readStore.SetData("users", "user-123", &readmodel.UserReadModel{
+		ID:           "user-123",
+		PasswordHash: "old-hash",
+	})
+
+	eventData := user.UserPasswordChanged{
+		UserID:       "user-123",
+		PasswordHash: "new-hash",
+		ChangedAt:    time.Now(),
+	}
+
+	value := makeEvent(user.AggregateType, user.EventUserPasswordChanged, eventData)
+
+	err := projector.HandleEvent(ctx, nil, value)
+
+	require.NoError(t, err)
+	data, _ := readStore.GetData("users", "user-123")
+	u := data.(*readmodel.UserReadModel)
+	assert.Equal(t, "new-hash", u.PasswordHash)
+}
+
+func TestProjector_HandleUserActivated(t *testing.T) {
+	projector, readStore := newTestProjector()
+	ctx := context.Background()
+
+	readStore.SetData("users", "user-123", &readmodel.UserReadModel{
+		ID:       "user-123",
+		IsActive: false,
+	})
+
+	eventData := user.UserActivated{
+		UserID:      "user-123",
+		ActivatedAt: time.Now(),
+	}
+
+	value := makeEvent(user.AggregateType, user.EventUserActivated, eventData)
+
+	err := projector.HandleEvent(ctx, nil, value)
+
+	require.NoError(t, err)
+	data, _ := readStore.GetData("users", "user-123")
+	u := data.(*readmodel.UserReadModel)
+	assert.True(t, u.IsActive)
+}
+
+// ============================================
+// Additional Inventory Event Tests
+// ============================================
+
+func TestProjector_HandleStockDeducted(t *testing.T) {
+	projector, readStore := newTestProjector()
+	ctx := context.Background()
+
+	readStore.SetData("inventory", "prod-123", &readmodel.InventoryReadModel{
+		ProductID:      "prod-123",
+		TotalStock:     100,
+		ReservedStock:  20,
+		AvailableStock: 80,
+	})
+
+	eventData := inventory.StockDeducted{
+		ProductID:  "prod-123",
+		OrderID:    "order-123",
+		Quantity:   10,
+		DeductedAt: time.Now(),
+	}
+
+	value := makeEvent(inventory.AggregateType, inventory.EventStockDeducted, eventData)
+
+	err := projector.HandleEvent(ctx, nil, value)
+
+	require.NoError(t, err)
+	data, _ := readStore.GetData("inventory", "prod-123")
+	inv := data.(*readmodel.InventoryReadModel)
+	assert.Equal(t, 90, inv.TotalStock)     // 100 - 10
+	assert.Equal(t, 10, inv.ReservedStock)  // 20 - 10
+	assert.Equal(t, 80, inv.AvailableStock) // 90 - 10
+}
+
+// ============================================
+// Additional Category Event Tests
+// ============================================
+
+func TestProjector_HandleCategoryUpdated(t *testing.T) {
+	projector, readStore := newTestProjector()
+	ctx := context.Background()
+
+	readStore.SetData("categories", "cat-123", &readmodel.CategoryReadModel{
+		ID:   "cat-123",
+		Name: "Old Name",
+		Slug: "old-slug",
+	})
+
+	eventData := category.CategoryUpdated{
+		CategoryID:  "cat-123",
+		Name:        "New Name",
+		Slug:        "new-slug",
+		Description: "Updated description",
+		SortOrder:   2,
+		UpdatedAt:   time.Now(),
+	}
+
+	value := makeEvent(category.AggregateType, category.EventCategoryUpdated, eventData)
+
+	err := projector.HandleEvent(ctx, nil, value)
+
+	require.NoError(t, err)
+	data, _ := readStore.GetData("categories", "cat-123")
+	c := data.(*readmodel.CategoryReadModel)
+	assert.Equal(t, "New Name", c.Name)
+	assert.Equal(t, "new-slug", c.Slug)
+	assert.Equal(t, 2, c.SortOrder)
+}
+
+// ============================================
+// Additional Cart Event Tests
+// ============================================
+
+func TestProjector_HandleItemAdded_SameProductIncreasesQuantity(t *testing.T) {
+	projector, readStore := newTestProjector()
+	ctx := context.Background()
+
+	readStore.SetData("products", "prod-123", &readmodel.ProductReadModel{ID: "prod-123", Name: "Test"})
+	readStore.SetData("carts", "cart-user-123", &readmodel.CartReadModel{
+		ID:     "cart-user-123",
+		UserID: "user-123",
+		Items: []readmodel.CartItemReadModel{
+			{ProductID: "prod-123", Quantity: 2, Price: 1000},
+		},
+		Total: 2000,
+	})
+
+	eventData := cart.ItemAddedToCart{
+		CartID:    "cart-user-123",
+		UserID:    "user-123",
+		ProductID: "prod-123",
+		Quantity:  3,
+		Price:     1000,
+		AddedAt:   time.Now(),
+	}
+
+	value := makeEvent(cart.AggregateType, cart.EventItemAdded, eventData)
+
+	err := projector.HandleEvent(ctx, nil, value)
+
+	require.NoError(t, err)
+	data, _ := readStore.GetData("carts", "cart-user-123")
+	c := data.(*readmodel.CartReadModel)
+	assert.Len(t, c.Items, 1)
+	assert.Equal(t, 5, c.Items[0].Quantity) // 2 + 3
+	assert.Equal(t, 5000, c.Total)          // 5 * 1000
+}
+
+// ============================================
+// Error Handling Tests
+// ============================================
+
+func TestProjector_HandleEvent_InvalidJSON(t *testing.T) {
+	projector, _ := newTestProjector()
+	ctx := context.Background()
+
+	invalidJSON := []byte(`{invalid json`)
+
+	err := projector.HandleEvent(ctx, nil, invalidJSON)
+
+	assert.Error(t, err)
+}
+
+// ============================================
 // Unknown Event Type Test
 // ============================================
 

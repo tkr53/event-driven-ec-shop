@@ -529,3 +529,145 @@ func TestHandler_CancelOrder_AlreadyShipped(t *testing.T) {
 
 	assert.ErrorIs(t, err, order.ErrOrderShipped)
 }
+
+// ============================================
+// Additional CreateProduct Tests
+// ============================================
+
+func TestHandler_CreateProduct_ZeroStock(t *testing.T) {
+	handler, eventStore, _ := newTestHandler()
+	ctx := context.Background()
+
+	cmd := CreateProduct{
+		Name:        "Test Product",
+		Description: "Description",
+		Price:       1000,
+		Stock:       0,
+	}
+
+	// Zero stock should fail because AddStock requires positive quantity
+	p, err := handler.CreateProduct(ctx, cmd)
+
+	assert.Error(t, err)
+	assert.Nil(t, p)
+	// ProductCreated event was recorded but AddStock failed
+	assert.Len(t, eventStore.AppendCalls, 1)
+}
+
+// ============================================
+// Additional PlaceOrder Tests
+// ============================================
+
+func TestHandler_PlaceOrder_InventoryNotFound(t *testing.T) {
+	handler, _, readStore := newTestHandler()
+	ctx := context.Background()
+
+	userID := "user-123"
+	cartID := cart.GetCartID(userID)
+
+	readStore.SetData("carts", cartID, &query.CartReadModel{
+		ID:     cartID,
+		UserID: userID,
+		Items: []query.CartItemReadModel{
+			{ProductID: "prod-no-inventory", Quantity: 1, Price: 1000},
+		},
+		Total: 1000,
+	})
+	// No inventory data set for prod-no-inventory
+
+	cmd := PlaceOrder{UserID: userID}
+
+	o, err := handler.PlaceOrder(ctx, cmd)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "inventory not found")
+	assert.Nil(t, o)
+}
+
+func TestHandler_PlaceOrder_MultipleItemsOneInsufficientStock(t *testing.T) {
+	handler, _, readStore := newTestHandler()
+	ctx := context.Background()
+
+	userID := "user-123"
+	cartID := cart.GetCartID(userID)
+
+	readStore.SetData("carts", cartID, &query.CartReadModel{
+		ID:     cartID,
+		UserID: userID,
+		Items: []query.CartItemReadModel{
+			{ProductID: "prod-1", Quantity: 5, Price: 1000},
+			{ProductID: "prod-2", Quantity: 100, Price: 2000}, // This one has insufficient stock
+		},
+		Total: 205000,
+	})
+
+	readStore.SetData("inventory", "prod-1", &query.InventoryReadModel{
+		ProductID:      "prod-1",
+		TotalStock:     100,
+		AvailableStock: 100,
+	})
+	readStore.SetData("inventory", "prod-2", &query.InventoryReadModel{
+		ProductID:      "prod-2",
+		TotalStock:     50,
+		AvailableStock: 50, // Only 50 available, requesting 100
+	})
+
+	cmd := PlaceOrder{UserID: userID}
+
+	o, err := handler.PlaceOrder(ctx, cmd)
+
+	assert.ErrorIs(t, err, inventory.ErrInsufficientStock)
+	assert.Nil(t, o)
+}
+
+// ============================================
+// Additional CancelOrder Tests
+// ============================================
+
+func TestHandler_CancelOrder_MultipleItems(t *testing.T) {
+	handler, eventStore, readStore := newTestHandler()
+	ctx := context.Background()
+
+	orderID := "order-123"
+
+	eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderPlaced, order.OrderPlaced{
+		OrderID: orderID,
+		Items: []order.OrderItem{
+			{ProductID: "prod-1", Quantity: 2},
+			{ProductID: "prod-2", Quantity: 3},
+		},
+	})
+
+	readStore.SetData("orders", orderID, &query.OrderReadModel{
+		ID:     orderID,
+		UserID: "user-123",
+		Items: []query.OrderItemReadModel{
+			{ProductID: "prod-1", Quantity: 2, Price: 1000},
+			{ProductID: "prod-2", Quantity: 3, Price: 500},
+		},
+		Status: "pending",
+	})
+
+	cmd := CancelOrder{
+		OrderID: orderID,
+		Reason:  "changed mind",
+	}
+
+	err := handler.CancelOrder(ctx, cmd)
+
+	require.NoError(t, err)
+
+	// Should have 2 StockReleased + 1 OrderCancelled
+	releaseCount := 0
+	cancelCount := 0
+	for _, call := range eventStore.AppendCalls {
+		if call.EventType == inventory.EventStockReleased {
+			releaseCount++
+		}
+		if call.EventType == order.EventOrderCancelled {
+			cancelCount++
+		}
+	}
+	assert.Equal(t, 2, releaseCount)
+	assert.Equal(t, 1, cancelCount)
+}
