@@ -1,4 +1,4 @@
-.PHONY: up down build api projector logs clean
+.PHONY: up down build api projector logs clean test test-coverage test-race
 
 # 全サービス起動（コンテナ）
 up:
@@ -46,3 +46,16 @@ test-create-product:
 # テスト用: 商品一覧
 test-list-products:
 	curl http://localhost:8080/products
+
+# ユニットテスト実行
+test:
+	go test -v ./...
+
+# カバレッジレポート生成
+test-coverage:
+	go test -v -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+
+# レースコンディション検出
+test-race:
+	go test -v -race ./...
