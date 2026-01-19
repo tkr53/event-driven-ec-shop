@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -12,6 +14,12 @@ import (
 	"github.com/example/ec-event-driven/internal/readmodel"
 	"github.com/google/uuid"
 )
+
+// hashToken creates a SHA-256 hash of the token for secure storage
+func hashToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
+}
 
 // AuthHandlers handles authentication-related HTTP requests
 type AuthHandlers struct {
@@ -170,14 +178,47 @@ func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
 
 // Refresh handles token refresh
 func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("refresh_token")
+	refreshCookie, err := r.Cookie("refresh_token")
 	if err != nil {
 		respondJSONError(w, "No refresh token", http.StatusUnauthorized)
 		return
 	}
 
-	userID, err := h.jwtService.ValidateRefreshToken(cookie.Value)
+	sessionCookie, err := r.Cookie("session_id")
 	if err != nil {
+		h.clearAuthCookies(w)
+		respondJSONError(w, "No session", http.StatusUnauthorized)
+		return
+	}
+
+	// Validate JWT token
+	userID, err := h.jwtService.ValidateRefreshToken(refreshCookie.Value)
+	if err != nil {
+		h.clearAuthCookies(w)
+		respondJSONError(w, "Invalid refresh token", http.StatusUnauthorized)
+		return
+	}
+
+	// Validate session exists and is not expired
+	sessionData, exists := h.readStore.Get("sessions", sessionCookie.Value)
+	if !exists {
+		h.clearAuthCookies(w)
+		respondJSONError(w, "Session not found", http.StatusUnauthorized)
+		return
+	}
+
+	session := sessionData.(*readmodel.SessionReadModel)
+
+	// Check session expiration
+	if time.Now().After(session.ExpiresAt) {
+		h.readStore.Delete("sessions", sessionCookie.Value)
+		h.clearAuthCookies(w)
+		respondJSONError(w, "Session expired", http.StatusUnauthorized)
+		return
+	}
+
+	// Verify refresh token hash matches stored hash
+	if hashToken(refreshCookie.Value) != session.RefreshTokenHash {
 		h.clearAuthCookies(w)
 		respondJSONError(w, "Invalid refresh token", http.StatusUnauthorized)
 		return
@@ -198,7 +239,10 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate new tokens
+	// Delete old session
+	h.readStore.Delete("sessions", sessionCookie.Value)
+
+	// Generate new tokens (this will create a new session)
 	h.setAuthCookies(w, userModel.ID, userModel.Email, userModel.Role, r)
 
 	respondJSON(w, http.StatusOK, map[string]string{
@@ -288,11 +332,11 @@ func (h *AuthHandlers) setAuthCookies(w http.ResponseWriter, userID, email, role
 	// Generate session ID
 	sessionID := uuid.New().String()
 
-	// Store session
+	// Store session with hashed refresh token
 	h.readStore.Set("sessions", sessionID, &readmodel.SessionReadModel{
 		ID:               sessionID,
 		UserID:           userID,
-		RefreshTokenHash: refreshToken, // In production, hash this
+		RefreshTokenHash: hashToken(refreshToken),
 		ExpiresAt:        refreshExpiry,
 		CreatedAt:        time.Now(),
 		IPAddress:        r.RemoteAddr,

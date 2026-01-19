@@ -35,7 +35,13 @@ func main() {
 	kafkaBrokers := strings.Split(kafkaBrokersStr, ",")
 	kafkaTopic := getEnv("KAFKA_TOPIC", "ec-events")
 	postgresConnStr := getEnv("DATABASE_URL", "postgres://ecapp:ecapp@localhost:5432/ecapp?sslmode=disable")
-	jwtSecret := getEnv("JWT_SECRET", "your-super-secret-key-change-in-production")
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatal("[API] JWT_SECRET environment variable is required")
+	}
+	if len(jwtSecret) < 32 {
+		log.Fatal("[API] JWT_SECRET must be at least 32 characters long")
+	}
 
 	log.Println("[API] ========================================")
 	log.Println("[API] EC Shop - CQRS Mode")

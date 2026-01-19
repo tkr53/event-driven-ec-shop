@@ -71,6 +71,7 @@ services:
       DATABASE_URL: postgres://ecapp:ecapp@postgres:5432/ecapp?sslmode=disable
       KAFKA_BROKERS: kafka:29092
       KAFKA_TOPIC: ec-events
+      JWT_SECRET: ${JWT_SECRET:-change-this-secret-in-production-min-32-chars}
     depends_on:
       postgres:
         condition: service_healthy

@@ -163,12 +163,33 @@ func (h *Handlers) GetOrder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Order not found", http.StatusNotFound)
 		return
 	}
+
+	// Authorization check: user can only access their own orders (admins can access all)
+	userID := getUserID(r)
+	if order.UserID != userID && !isAdmin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
 	respondJSON(w, http.StatusOK, order)
 }
 
 func (h *Handlers) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/orders/")
 	id := strings.TrimSuffix(path, "/cancel")
+
+	// Authorization check: user can only cancel their own orders (admins can cancel all)
+	order, ok := h.queryHandler.GetOrder(id)
+	if !ok {
+		http.Error(w, "Order not found", http.StatusNotFound)
+		return
+	}
+
+	userID := getUserID(r)
+	if order.UserID != userID && !isAdmin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 
 	var req struct {
 		Reason string `json:"reason"`
@@ -219,4 +240,13 @@ func getUserID(r *http.Request) string {
 	}
 
 	return "default-user"
+}
+
+// isAdmin checks if the current user has admin role
+func isAdmin(r *http.Request) bool {
+	claims, ok := middleware.GetUserFromContext(r.Context())
+	if !ok {
+		return false
+	}
+	return claims.Role == "admin"
 }

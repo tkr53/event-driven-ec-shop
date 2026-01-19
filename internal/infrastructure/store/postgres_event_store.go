@@ -31,40 +31,37 @@ func (es *PostgresEventStore) Append(ctx context.Context, aggregateID, aggregate
 		return nil, err
 	}
 
-	// Get next version
-	var currentVersion int
+	eventID := uuid.New().String()
+	timestamp := time.Now()
+
+	// Use atomic INSERT ... SELECT to avoid race condition on version
+	// This calculates and inserts the version in a single operation
+	var version int
 	err = es.db.QueryRowContext(ctx,
-		"SELECT COALESCE(MAX(version), 0) FROM events WHERE aggregate_id = $1",
+		`INSERT INTO events (id, aggregate_id, aggregate_type, event_type, data, version, created_at)
+		 SELECT $1, $2, $3, $4, $5, COALESCE(MAX(version), 0) + 1, $6
+		 FROM events
+		 WHERE aggregate_id = $2
+		 RETURNING version`,
+		eventID,
 		aggregateID,
-	).Scan(&currentVersion)
+		aggregateType,
+		eventType,
+		jsonData,
+		timestamp,
+	).Scan(&version)
 	if err != nil {
 		return nil, err
 	}
 
 	event := Event{
-		ID:            uuid.New().String(),
+		ID:            eventID,
 		AggregateID:   aggregateID,
 		AggregateType: aggregateType,
 		EventType:     eventType,
 		Data:          jsonData,
-		Timestamp:     time.Now(),
-		Version:       currentVersion + 1,
-	}
-
-	// Insert event
-	_, err = es.db.ExecContext(ctx,
-		`INSERT INTO events (id, aggregate_id, aggregate_type, event_type, data, version, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		event.ID,
-		event.AggregateID,
-		event.AggregateType,
-		event.EventType,
-		event.Data,
-		event.Version,
-		event.Timestamp,
-	)
-	if err != nil {
-		return nil, err
+		Timestamp:     timestamp,
+		Version:       version,
 	}
 
 	// Publish to Kafka
