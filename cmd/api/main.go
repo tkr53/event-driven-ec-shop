@@ -11,14 +11,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/example/ec-event-driven/internal/api"
 	"github.com/example/ec-event-driven/internal/auth"
 	"github.com/example/ec-event-driven/internal/command"
 	"github.com/example/ec-event-driven/internal/domain/cart"
+	"github.com/example/ec-event-driven/internal/domain/category"
 	"github.com/example/ec-event-driven/internal/domain/inventory"
 	"github.com/example/ec-event-driven/internal/domain/order"
 	"github.com/example/ec-event-driven/internal/domain/product"
-	"github.com/example/ec-event-driven/internal/domain/category"
 	"github.com/example/ec-event-driven/internal/domain/user"
 	"github.com/example/ec-event-driven/internal/infrastructure/kafka"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
@@ -43,28 +46,42 @@ func main() {
 		log.Fatal("[API] JWT_SECRET must be at least 32 characters long")
 	}
 
+	// DynamoDB configuration
+	dynamoTableName := getEnv("DYNAMODB_TABLE_NAME", "events")
+	dynamoRegion := getEnv("DYNAMODB_REGION", "ap-northeast-1")
+	dynamoEndpoint := os.Getenv("DYNAMODB_ENDPOINT")
+
 	log.Println("[API] ========================================")
 	log.Println("[API] EC Shop - CQRS Mode")
 	log.Println("[API] ========================================")
 	log.Printf("[API] Kafka: %v", kafkaBrokers)
 	log.Printf("[API] Topic: %s", kafkaTopic)
-	log.Println("[API] Write DB: PostgreSQL (events table)")
+	log.Println("[API] Write DB: DynamoDB (events table)")
 	log.Println("[API] Read DB:  PostgreSQL (read_* tables)")
 
 	// Initialize Kafka producer
 	producer := kafka.NewProducer(kafkaBrokers, kafkaTopic)
 	defer producer.Close()
 
-	// Initialize PostgreSQL connection
+	// Initialize DynamoDB client
+	dynamoClient, err := newDynamoDBClient(ctx, dynamoRegion, dynamoEndpoint)
+	if err != nil {
+		log.Fatalf("[API] Failed to create DynamoDB client: %v", err)
+	}
+
+	// Initialize DynamoDB EventStore
+	eventStore := store.NewDynamoEventStore(dynamoClient, dynamoTableName, producer)
+	log.Printf("[API] Event Store: DynamoDB (table: %s)", dynamoTableName)
+
+	// Initialize PostgreSQL connection for read store
 	db, err := store.ConnectPostgres(postgresConnStr)
 	if err != nil {
 		log.Fatalf("[API] Failed to connect to PostgreSQL: %v", err)
 	}
 	defer db.Close()
-	log.Println("[API] Connected to PostgreSQL")
+	log.Println("[API] Connected to PostgreSQL (read store)")
 
-	// Initialize stores
-	eventStore := store.NewPostgresEventStore(db, producer)
+	// Initialize read store
 	readStore := store.NewPostgresReadStore(db) // Use PostgreSQL for read models
 
 	// Initialize domain services
@@ -89,8 +106,8 @@ func main() {
 	// Initialize projector
 	projector := projection.NewProjector(readStore)
 
-	// Replay existing events from PostgreSQL to build read models
-	log.Println("[API] Replaying events from PostgreSQL...")
+	// Replay existing events from event store to build read models
+	log.Println("[API] Replaying events from event store...")
 	replayEvents(eventStore, projector)
 
 	// Start Kafka consumer for new events (async projection)
@@ -170,8 +187,38 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// replayEvents replays all events from PostgreSQL to rebuild read models
-func replayEvents(eventStore *store.PostgresEventStore, projector *projection.Projector) {
+// newDynamoDBClient creates a DynamoDB client with optional local endpoint
+func newDynamoDBClient(ctx context.Context, region, endpoint string) (*dynamodb.Client, error) {
+	var cfg aws.Config
+	var err error
+
+	if endpoint != "" {
+		// Local development with DynamoDB Local
+		cfg, err = config.LoadDefaultConfig(ctx,
+			config.WithRegion(region),
+			config.WithEndpointResolverWithOptions(
+				aws.EndpointResolverWithOptionsFunc(func(service, reg string, options ...interface{}) (aws.Endpoint, error) {
+					return aws.Endpoint{
+						URL:           endpoint,
+						SigningRegion: reg,
+					}, nil
+				}),
+			),
+		)
+	} else {
+		// Production AWS
+		cfg, err = config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return dynamodb.NewFromConfig(cfg), nil
+}
+
+// replayEvents replays all events from the event store to rebuild read models
+func replayEvents(eventStore *store.DynamoEventStore, projector *projection.Projector) {
 	events := eventStore.GetAllEvents()
 	log.Printf("[API] Replaying %d events from event store...", len(events))
 
