@@ -10,7 +10,7 @@ down:
 
 # インフラのみ起動（ローカル開発用）
 infra:
-	docker-compose up -d zookeeper kafka kafka-ui postgres
+	docker-compose up -d kafka kafka-ui postgres dynamodb-local dynamodb-admin
 
 # ビルドのみ
 build:

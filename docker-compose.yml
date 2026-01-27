@@ -44,6 +44,30 @@ services:
       - "8025:8025"
     restart: unless-stopped
 
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin:latest
+    ports:
+      - "8001:8001"
+    environment:
+      DYNAMO_ENDPOINT: http://dynamodb-local:8000
+      AWS_REGION: ap-northeast-1
+      AWS_ACCESS_KEY_ID: dummy
+      AWS_SECRET_ACCESS_KEY: dummy
+    depends_on:
+      - dynamodb-local
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -72,10 +96,19 @@ services:
       KAFKA_BROKERS: kafka:29092
       KAFKA_TOPIC: ec-events
       JWT_SECRET: ${JWT_SECRET:-change-this-secret-in-production-min-32-chars}
+      # DynamoDB EventStore configuration
+      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      DYNAMODB_TABLE_NAME: ${DYNAMODB_TABLE_NAME:-events}
+      DYNAMODB_REGION: ${DYNAMODB_REGION:-ap-northeast-1}
+      # AWS credentials for DynamoDB Local
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-dummy}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-dummy}
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      dynamodb-local:
         condition: service_healthy
     restart: unless-stopped
 
