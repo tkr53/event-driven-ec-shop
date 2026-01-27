@@ -2,10 +2,12 @@
 
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCart } from '@/contexts/CartContext';
 import { useState } from 'react';
 
 export function Header() {
   const { user, isAuthenticated, logout, isLoading } = useAuth();
+  const { itemCount } = useCart();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const handleLogout = async () => {
@@ -33,8 +35,13 @@ export function Header() {
             <Link href="/categories" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
               カテゴリ
             </Link>
-            <Link href="/cart" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
+            <Link href="/cart" className="relative text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
               カート
+              {itemCount > 0 && (
+                <span className="absolute -top-2 -right-4 min-w-[20px] h-5 flex items-center justify-center px-1 text-xs font-bold bg-blue-600 text-white rounded-full">
+                  {itemCount > 99 ? '99+' : itemCount}
+                </span>
+              )}
             </Link>
           </nav>
 
