@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import type { Cart, Product } from '@/types';
 import api from '@/lib/api';
 import { useAuth } from './AuthContext';
@@ -15,6 +15,20 @@ interface CartContextType {
   clearCart: () => void;
 }
 
+// Pending operation types
+interface PendingAdd {
+  type: 'add';
+  productId: string;
+  quantity: number;
+}
+
+interface PendingRemove {
+  type: 'remove';
+  productId: string;
+}
+
+type PendingOperation = PendingAdd | PendingRemove;
+
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 const CART_STORAGE_KEY = 'optimistic_cart';
@@ -23,6 +37,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated } = useAuth();
   const [cart, setCart] = useState<Cart | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Track pending operations to verify server sync
+  const pendingOperations = useRef<PendingOperation[]>([]);
 
   // Calculate item count from cart
   const itemCount = cart?.items?.reduce((sum, item) => sum + item.quantity, 0) ?? 0;
@@ -92,6 +109,49 @@ export function CartProvider({ children }: { children: ReactNode }) {
     fetchCart();
   }, [isAuthenticated, user?.id, fetchCart, loadOptimisticCart]);
 
+  // Check if server cart reflects all pending operations
+  const isServerCartSynced = useCallback((serverCart: Cart | null): boolean => {
+    for (const op of pendingOperations.current) {
+      if (op.type === 'add') {
+        // Check if the product exists in server cart
+        const serverItem = serverCart?.items?.find(item => item.product_id === op.productId);
+        if (!serverItem) {
+          return false;
+        }
+      } else if (op.type === 'remove') {
+        // Check if the product is removed from server cart
+        const serverItem = serverCart?.items?.find(item => item.product_id === op.productId);
+        if (serverItem) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }, []);
+
+  // Sync with server with retry until pending operations are reflected
+  const syncWithServer = useCallback(async (maxRetries = 10, delayMs = 500) => {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const serverCart = await api.getCart();
+        if (isServerCartSynced(serverCart)) {
+          // Server has caught up, clear pending operations and update state
+          pendingOperations.current = [];
+          setCart(serverCart);
+          saveOptimisticCart(serverCart);
+          return;
+        }
+        // Server hasn't caught up yet, wait and retry
+        await new Promise(r => setTimeout(r, delayMs));
+      } catch {
+        // Keep optimistic state if sync fails
+        return;
+      }
+    }
+    // Max retries reached, clear pending operations anyway to prevent stale state
+    pendingOperations.current = [];
+  }, [isServerCartSynced, saveOptimisticCart]);
+
   // Add item to cart with optimistic update
   const addToCart = useCallback(async (product: Product, quantity: number) => {
     if (!user) return;
@@ -134,6 +194,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setCart(optimisticCart);
     saveOptimisticCart(optimisticCart);
 
+    // Track pending operation
+    pendingOperations.current.push({ type: 'add', productId: product.id, quantity });
+
     try {
       // API call
       await api.addToCart({
@@ -142,22 +205,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
       });
 
       // Sync with server after a short delay
-      setTimeout(async () => {
-        try {
-          const serverCart = await api.getCartWithRetry();
-          setCart(serverCart);
-          saveOptimisticCart(serverCart);
-        } catch {
-          // Keep optimistic state if sync fails
-        }
-      }, 500);
+      setTimeout(() => syncWithServer(), 500);
     } catch (error) {
       // Rollback on error
+      pendingOperations.current = pendingOperations.current.filter(
+        op => !(op.type === 'add' && op.productId === product.id)
+      );
       setCart(previousCart);
       saveOptimisticCart(previousCart);
       throw error;
     }
-  }, [cart, user, saveOptimisticCart]);
+  }, [cart, user, saveOptimisticCart, syncWithServer]);
 
   // Remove item from cart with optimistic update
   const removeFromCart = useCallback(async (productId: string) => {
@@ -177,27 +235,25 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setCart(optimisticCart);
     saveOptimisticCart(optimisticCart);
 
+    // Track pending operation
+    pendingOperations.current.push({ type: 'remove', productId });
+
     try {
       // API call
       await api.removeFromCart(productId);
 
       // Sync with server after a short delay
-      setTimeout(async () => {
-        try {
-          const serverCart = await api.getCartWithRetry();
-          setCart(serverCart);
-          saveOptimisticCart(serverCart);
-        } catch {
-          // Keep optimistic state if sync fails
-        }
-      }, 500);
+      setTimeout(() => syncWithServer(), 500);
     } catch (error) {
       // Rollback on error
+      pendingOperations.current = pendingOperations.current.filter(
+        op => !(op.type === 'remove' && op.productId === productId)
+      );
       setCart(previousCart);
       saveOptimisticCart(previousCart);
       throw error;
     }
-  }, [cart, saveOptimisticCart]);
+  }, [cart, saveOptimisticCart, syncWithServer]);
 
   // Refresh cart from server
   const refreshCart = useCallback(async () => {
