@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -25,7 +24,6 @@ import (
 	"github.com/example/ec-event-driven/internal/domain/user"
 	"github.com/example/ec-event-driven/internal/infrastructure/kafka"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
-	"github.com/example/ec-event-driven/internal/projection"
 	"github.com/example/ec-event-driven/internal/query"
 )
 
@@ -104,38 +102,9 @@ func main() {
 	cmdHandler := command.NewHandler(productSvc, cartSvc, orderSvc, inventorySvc, readStore)
 	queryHandler := query.NewHandler(readStore)
 
-	// Initialize projector
-	projector := projection.NewProjector(readStore)
-
-	// Replay existing events from event store to build read models
-	log.Println("[API] Replaying events from event store...")
-	replayEvents(eventStore, projector)
-
-	// Start Kafka consumer for new events (async projection)
-	consumer := kafka.NewConsumer(kafkaBrokers, kafkaTopic, "api-projector")
-	defer consumer.Close()
-
-	// Use WaitGroup to ensure consumer is ready
-	var wg sync.WaitGroup
-	consumerReady := make(chan struct{})
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		log.Println("[API] Starting Kafka consumer (async projection)...")
-		close(consumerReady) // Signal that consumer is starting
-		if err := consumer.Consume(ctx, projector.HandleEvent); err != nil {
-			if ctx.Err() == nil {
-				log.Printf("[API] Projector error: %v", err)
-			}
-		}
-	}()
-
-	// Wait for consumer to start
-	<-consumerReady
-	// Give Kafka consumer a moment to establish connection
-	time.Sleep(500 * time.Millisecond)
-	log.Println("[API] Kafka consumer ready")
+	// Note: Read model updates are handled by the separate Projector service
+	// The API only writes events to the event store and publishes to Kafka
+	log.Println("[API] Read model updates delegated to Projector service")
 
 	// Initialize API
 	handlers := api.NewHandlers(cmdHandler, queryHandler)
@@ -172,13 +141,11 @@ func main() {
 	<-sigCh
 
 	log.Println("[API] Shutting down...")
-	cancel() // Cancel context to stop consumer
+	cancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	server.Shutdown(shutdownCtx)
-
-	wg.Wait() // Wait for consumer to finish
 }
 
 func getEnv(key, defaultValue string) string {
@@ -216,19 +183,4 @@ func newDynamoDBClient(ctx context.Context, region, endpoint string) (*dynamodb.
 	}
 
 	return dynamodb.NewFromConfig(cfg), nil
-}
-
-// replayEvents replays all events from the event store to rebuild read models
-func replayEvents(eventStore *store.DynamoEventStore, projector *projection.Projector) {
-	events := eventStore.GetAllEvents()
-	log.Printf("[API] Replaying %d events from event store...", len(events))
-
-	ctx := context.Background()
-	for _, event := range events {
-		data, _ := event.MarshalJSON()
-		if err := projector.HandleEvent(ctx, []byte(event.AggregateID), data); err != nil {
-			log.Printf("[API] Error replaying event %s: %v", event.ID, err)
-		}
-	}
-	log.Println("[API] Event replay completed - read models rebuilt")
 }

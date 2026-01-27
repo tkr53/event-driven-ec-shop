@@ -57,12 +57,14 @@ func (p *Projector) handleProductEvent(event store.Event) error {
 		if err := json.Unmarshal(event.Data, &e); err != nil {
 			return err
 		}
+		// Stock is managed by Inventory aggregate, so start with 0 here
+		// StockAdded event will set the actual stock value
 		p.readStore.Set("products", e.ProductID, &readmodel.ProductReadModel{
 			ID:          e.ProductID,
 			Name:        e.Name,
 			Description: e.Description,
 			Price:       e.Price,
-			Stock:       e.Stock,
+			Stock:       0,
 			CreatedAt:   e.CreatedAt,
 			UpdatedAt:   e.CreatedAt,
 		})
