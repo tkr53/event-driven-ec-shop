@@ -29,14 +29,32 @@ type Consumer struct {
 	maxRetries int
 }
 
-func NewConsumer(brokers []string, topic, groupID string) *Consumer {
-	reader := kafka.NewReader(kafka.ReaderConfig{
+// ConsumerOption is a function that configures a Consumer
+type ConsumerOption func(*kafka.ReaderConfig)
+
+// WithStartFromLatest configures the consumer to start from the latest offset
+// when there's no committed offset for the consumer group
+func WithStartFromLatest() ConsumerOption {
+	return func(cfg *kafka.ReaderConfig) {
+		cfg.StartOffset = kafka.LastOffset
+	}
+}
+
+func NewConsumer(brokers []string, topic, groupID string, opts ...ConsumerOption) *Consumer {
+	cfg := kafka.ReaderConfig{
 		Brokers:  brokers,
 		Topic:    topic,
 		GroupID:  groupID,
 		MinBytes: 10e3, // 10KB
 		MaxBytes: 10e6, // 10MB
-	})
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	reader := kafka.NewReader(cfg)
 
 	// Dead Letter Queue writer for failed messages
 	dlqWriter := &kafka.Writer{

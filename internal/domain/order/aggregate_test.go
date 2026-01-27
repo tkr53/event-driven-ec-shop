@@ -2,9 +2,11 @@ package order
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
+	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/infrastructure/store/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -482,4 +484,157 @@ func TestService_Cancel_EventStoreError(t *testing.T) {
 	err := service.Cancel(ctx, orderID, "reason")
 
 	assert.Error(t, err)
+}
+
+// ============================================
+// Snapshot Tests
+// ============================================
+
+func TestService_SnapshotCreatedAtThreshold(t *testing.T) {
+	service, eventStore := newTestOrderService()
+	ctx := context.Background()
+
+	testOrderID := "snapshot-order"
+
+	// Manually add 9 events using SetEvents (to control versions)
+	events := make([]store.Event, 9)
+	for i := 0; i < 9; i++ {
+		events[i] = store.Event{
+			Version:       i + 1,
+			AggregateID:   testOrderID,
+			AggregateType: AggregateType,
+		}
+		if i == 0 {
+			events[i].EventType = EventOrderPlaced
+			events[i].Data = mustMarshal(OrderPlaced{OrderID: testOrderID, UserID: "user-1"})
+		} else {
+			// Just add paid events (we'll override status in the last one)
+			events[i].EventType = EventOrderPaid
+			events[i].Data = mustMarshal(OrderPaid{OrderID: testOrderID})
+		}
+	}
+	// Set the last event to be "pending" state by making all intermediate events irrelevant
+	// Actually, we need the order to be in pending state for Pay to work
+	// Let's simplify: just have OrderPlaced + 8 more OrderPlaced events (not realistic but tests the snapshot)
+
+	// Better approach: set up 9 events ending in pending state
+	eventStore.SetEvents(testOrderID, []store.Event{
+		{Version: 1, EventType: EventOrderPlaced, Data: mustMarshal(OrderPlaced{OrderID: testOrderID, UserID: "user-1"})},
+		{Version: 2, EventType: EventOrderPaid, Data: mustMarshal(OrderPaid{OrderID: testOrderID})},
+		{Version: 3, EventType: EventOrderCancelled, Data: mustMarshal(OrderCancelled{OrderID: testOrderID})},
+		{Version: 4, EventType: EventOrderPlaced, Data: mustMarshal(OrderPlaced{OrderID: testOrderID, UserID: "user-1"})},
+		{Version: 5, EventType: EventOrderPaid, Data: mustMarshal(OrderPaid{OrderID: testOrderID})},
+		{Version: 6, EventType: EventOrderCancelled, Data: mustMarshal(OrderCancelled{OrderID: testOrderID})},
+		{Version: 7, EventType: EventOrderPlaced, Data: mustMarshal(OrderPlaced{OrderID: testOrderID, UserID: "user-1"})},
+		{Version: 8, EventType: EventOrderPaid, Data: mustMarshal(OrderPaid{OrderID: testOrderID})},
+		{Version: 9, EventType: EventOrderCancelled, Data: mustMarshal(OrderCancelled{OrderID: testOrderID})},
+	})
+
+	// Now we need to add one more event to get to 10
+	// But the order is cancelled, so we can't pay it
+	// Let's use a different approach: add OrderPlaced as the 9th event
+	eventStore.Reset()
+	eventStore.SetEvents(testOrderID, []store.Event{
+		{Version: 1, EventType: EventOrderPlaced, Data: mustMarshal(OrderPlaced{OrderID: testOrderID, UserID: "user-1"})},
+		{Version: 2, EventType: EventOrderPaid, Data: mustMarshal(OrderPaid{OrderID: testOrderID})},
+		{Version: 3, EventType: EventOrderShipped, Data: mustMarshal(OrderShipped{OrderID: testOrderID})},
+		{Version: 4, EventType: EventOrderPlaced, Data: mustMarshal(OrderPlaced{OrderID: testOrderID, UserID: "user-1"})},
+		{Version: 5, EventType: EventOrderPaid, Data: mustMarshal(OrderPaid{OrderID: testOrderID})},
+		{Version: 6, EventType: EventOrderShipped, Data: mustMarshal(OrderShipped{OrderID: testOrderID})},
+		{Version: 7, EventType: EventOrderPlaced, Data: mustMarshal(OrderPlaced{OrderID: testOrderID, UserID: "user-1"})},
+		{Version: 8, EventType: EventOrderPaid, Data: mustMarshal(OrderPaid{OrderID: testOrderID})},
+		{Version: 9, EventType: EventOrderPlaced, Data: mustMarshal(OrderPlaced{OrderID: testOrderID, UserID: "user-1"})},
+	})
+
+	// The 10th event (Pay) should trigger a snapshot
+	err := service.Pay(ctx, testOrderID)
+	require.NoError(t, err)
+
+	// Verify snapshot was created
+	assert.Len(t, eventStore.SaveSnapshotCalls, 1)
+	assert.Equal(t, testOrderID, eventStore.SaveSnapshotCalls[0].Snapshot.AggregateID)
+	assert.Equal(t, 10, eventStore.SaveSnapshotCalls[0].Snapshot.Version)
+}
+
+func TestService_LoadOrderFromSnapshot(t *testing.T) {
+	service, eventStore := newTestOrderService()
+	ctx := context.Background()
+
+	orderID := "order-with-snapshot"
+
+	// Create a snapshot at version 10
+	snapshotState := Order{
+		ID:     orderID,
+		UserID: "user-123",
+		Items:  []OrderItem{{ProductID: "prod-1", Quantity: 2, Price: 1000}},
+		Total:  2000,
+		Status: StatusPaid,
+	}
+	stateJSON, _ := json.Marshal(snapshotState)
+	eventStore.SetSnapshot(&store.Snapshot{
+		AggregateID:   orderID,
+		AggregateType: AggregateType,
+		Version:       10,
+		State:         stateJSON,
+	})
+
+	// Ship the order - this should load from snapshot first
+	err := service.Ship(ctx, orderID)
+	require.NoError(t, err)
+
+	// Verify the ship event was appended
+	assert.Len(t, eventStore.AppendCalls, 1)
+	assert.Equal(t, EventOrderShipped, eventStore.AppendCalls[0].EventType)
+}
+
+func TestService_LoadOrderFromSnapshotWithSubsequentEvents(t *testing.T) {
+	service, eventStore := newTestOrderService()
+	ctx := context.Background()
+
+	orderID := "order-with-snapshot-and-events"
+
+	// Create a snapshot at version 5 with pending status
+	snapshotState := Order{
+		ID:     orderID,
+		UserID: "user-123",
+		Items:  []OrderItem{{ProductID: "prod-1", Quantity: 1, Price: 1000}},
+		Total:  1000,
+		Status: StatusPending,
+	}
+	stateJSON, _ := json.Marshal(snapshotState)
+	eventStore.SetSnapshot(&store.Snapshot{
+		AggregateID:   orderID,
+		AggregateType: AggregateType,
+		Version:       5,
+		State:         stateJSON,
+	})
+
+	// Add events after the snapshot (versions 6, 7)
+	eventStore.SetEvents(orderID, []store.Event{
+		{Version: 6, EventType: EventOrderPaid, Data: mustMarshal(OrderPaid{OrderID: orderID})},
+	})
+
+	// Try to ship - should succeed because the order is paid (from event version 6)
+	err := service.Ship(ctx, orderID)
+	require.NoError(t, err)
+}
+
+func TestService_LoadOrderWithoutSnapshot(t *testing.T) {
+	service, eventStore := newTestOrderService()
+	ctx := context.Background()
+
+	orderID := "order-no-snapshot"
+
+	// Add events without snapshot
+	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID, UserID: "user-123"})
+	eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
+
+	// Ship the order - should work by replaying all events
+	err := service.Ship(ctx, orderID)
+	require.NoError(t, err)
+}
+
+func mustMarshal(v any) json.RawMessage {
+	data, _ := json.Marshal(v)
+	return data
 }

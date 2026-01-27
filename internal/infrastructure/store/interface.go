@@ -31,6 +31,9 @@ type EventStoreInterface interface {
 	Append(ctx context.Context, aggregateID, aggregateType, eventType string, data any) (*Event, error)
 	GetEvents(aggregateID string) []Event
 	GetAllEvents() []Event
+	SaveSnapshot(ctx context.Context, snapshot *Snapshot) error
+	GetSnapshot(ctx context.Context, aggregateID string) (*Snapshot, error)
+	GetEventsFromVersion(ctx context.Context, aggregateID string, fromVersion int) []Event
 }
 
 // ConnectPostgres establishes a connection to PostgreSQL
