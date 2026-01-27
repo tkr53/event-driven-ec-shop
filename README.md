@@ -59,7 +59,7 @@ Go + Apache Kafka + PostgreSQL を使った**イベント駆動アーキテク�
 │            ▼                                   │  read_inventory   │       │
 │  ┌───────────────────┐                         └───────────────────┘       │
 │  │  Event Store      │                                   ▲                  │
-│  │  (PostgreSQL)     │                                   │                  │
+│  │  (DynamoDB)       │                                   │                  │
 │  │  events table     │                                   │                  │
 │  └─────────┬─────────┘                                   │                  │
 │            │                                             │                  │
@@ -101,13 +101,13 @@ Go + Apache Kafka + PostgreSQL を使った**イベント駆動アーキテク�
 
 ### DB構成（CQRS分離）
 
-| 用途 | テーブル | 説明 |
+| 用途 | ストレージ | 説明 |
 |------|----------|------|
-| **Write DB** | `events` | イベントストア（追記専用） |
-| **Read DB** | `read_products` | 商品一覧クエリ用 |
-| **Read DB** | `read_carts` | カート情報クエリ用 |
-| **Read DB** | `read_orders` | 注文履歴クエリ用 |
-| **Read DB** | `read_inventory` | 在庫情報クエリ用 |
+| **Write DB** | DynamoDB `events` | イベントストア（追記専用） |
+| **Read DB** | PostgreSQL `read_products` | 商品一覧クエリ用 |
+| **Read DB** | PostgreSQL `read_carts` | カート情報クエリ用 |
+| **Read DB** | PostgreSQL `read_orders` | 注文履歴クエリ用 |
+| **Read DB** | PostgreSQL `read_inventory` | 在庫情報クエリ用 |
 
 ---
 
@@ -132,7 +132,7 @@ Go + Apache Kafka + PostgreSQL を使った**イベント駆動アーキテク�
 ```
                     ┌─────────────────────┐
                     │      Command        │      ┌──────────────────┐
-          Write ───▶│  (データ変更)        │─────▶│ PostgreSQL       │
+          Write ───▶│  (データ変更)        │─────▶│ DynamoDB         │
                     └─────────────────────┘      │ events テーブル   │
                                                  └────────┬─────────┘
                                                           │
@@ -266,9 +266,8 @@ event-driven-app/
 │       │   ├── producer.go      # Kafkaプロデューサー
 │       │   └── consumer.go      # Kafkaコンシューマー
 │       └── store/
-│           ├── interface.go           # EventStoreインターフェース
-│           ├── event_store.go         # インメモリEventStore（開発用）
-│           ├── postgres_event_store.go # PostgreSQL EventStore（本番用）
+│           ├── interface.go           # Event構造体・EventStoreインターフェース
+│           ├── dynamo_event_store.go   # DynamoDB EventStore
 │           ├── read_store.go          # インメモリRead Store（開発用）
 │           ├── read_store_interface.go # ReadStoreインターフェース
 │           └── postgres_read_store.go  # PostgreSQL Read Store（本番用）
@@ -278,7 +277,8 @@ event-driven-app/
 │
 ├── docker-compose.yml           # Docker構成
 ├── Dockerfile                   # マルチステージビルド
-├── init.sql                     # PostgreSQL初期化（events + read_* テーブル）
+├── init.sql                     # PostgreSQL初期化（read_* テーブル）
+├── init-dynamodb.sh             # DynamoDB Local初期化スクリプト
 ├── Makefile                     # タスクランナー
 ├── go.mod                       # Go モジュール定義
 └── go.sum                       # 依存関係ロック
@@ -304,20 +304,33 @@ event-driven-app/
 
 | 技術 | 用途 | バージョン |
 |------|------|-----------|
-| **Go** | バックエンド言語 | 1.23 |
+| **Go** | バックエンド言語 | 1.24 |
 | **Apache Kafka** | メッセージブローカー（イベント配信） | 7.5.0 (Confluent) |
-| **PostgreSQL** | Write DB（イベントストア）+ Read DB | 16 |
+| **DynamoDB** | Write DB（イベントストア） | Local / AWS |
+| **PostgreSQL** | Read DB（読み取りモデル） | 16 |
 | **Docker** | コンテナ化 | - |
 
 ### データベース設計
 
 | DB | テーブル | 用途 |
 |----|----------|------|
-| **Write DB** | `events` | イベントソース（Append-Only） |
-| **Read DB** | `read_products` | 商品クエリ用（非正規化） |
-| **Read DB** | `read_carts` | カートクエリ用（JSONカラム使用） |
-| **Read DB** | `read_orders` | 注文クエリ用（JSONカラム使用） |
-| **Read DB** | `read_inventory` | 在庫クエリ用 |
+| **Write DB (DynamoDB)** | `events` | イベントソース（Append-Only） |
+| **Read DB (PostgreSQL)** | `read_products` | 商品クエリ用（非正規化） |
+| **Read DB (PostgreSQL)** | `read_carts` | カートクエリ用（JSONカラム使用） |
+| **Read DB (PostgreSQL)** | `read_orders` | 注文クエリ用（JSONカラム使用） |
+| **Read DB (PostgreSQL)** | `read_inventory` | 在庫クエリ用 |
+
+### DynamoDBテーブル設計
+
+```
+テーブル名: events
+- Partition Key: aggregate_id (String)
+- Sort Key: version (Number)
+
+GSI1 (全イベント取得用):
+- Partition Key: gsi1pk (固定値 "EVENTS")
+- Sort Key: created_at (String - ISO8601)
+```
 
 ### 使用ライブラリ
 
@@ -326,6 +339,7 @@ event-driven-app/
 | `github.com/segmentio/kafka-go` | Kafkaクライアント |
 | `github.com/lib/pq` | PostgreSQLドライバ |
 | `github.com/google/uuid` | UUID生成 |
+| `github.com/aws/aws-sdk-go-v2` | AWS SDK（DynamoDB用） |
 
 ---
 
@@ -342,12 +356,45 @@ event-driven-app/
 # リポジトリをクローン
 cd event-driven-app
 
-# 全サービスを起動（ビルド含む）
+# 1. インフラを起動（Kafka, PostgreSQL, DynamoDB）
+make infra
+
+# 2. DynamoDB テーブルを初期化（初回のみ、起動完了を待機）
+./init-dynamodb.sh
+
+# 3. 全サービスを起動
 make up
 
 # ログを確認
 make logs
 ```
+
+### ローカル開発（go runで起動）
+
+```bash
+# 1. インフラを起動
+make infra
+
+# 2. DynamoDB テーブルを初期化（初回のみ）
+./init-dynamodb.sh
+
+# 3. APIを起動（go run）
+DYNAMODB_ENDPOINT=http://localhost:8000 \
+JWT_SECRET=your-secret-key-at-least-32-characters \
+go run cmd/api/main.go
+```
+
+### 環境変数
+
+| 変数名 | 説明 | デフォルト |
+|--------|------|------------|
+| `DYNAMODB_TABLE_NAME` | DynamoDBテーブル名 | `events` |
+| `DYNAMODB_REGION` | AWSリージョン | `ap-northeast-1` |
+| `DYNAMODB_ENDPOINT` | ローカル開発用エンドポイント | (空=AWS本番) |
+
+### DynamoDB Admin UI
+
+DynamoDB Localのデータを確認するには http://localhost:8001 にアクセスしてください。
 
 ### サービス一覧
 
@@ -359,7 +406,9 @@ make logs
 | **Notifier** | - | Kafkaコンシューマー（メール送信） |
 | **Kafka UI** | http://localhost:8081 | Kafkaモニタリング |
 | **Mailpit** | http://localhost:8025 | 開発用メールサーバ（受信メール確認） |
-| **PostgreSQL** | localhost:5432 | Write DB + Read DB |
+| **DynamoDB Local** | http://localhost:8000 | Write DB（イベントストア） |
+| **DynamoDB Admin** | http://localhost:8001 | DynamoDBモニタリングUI |
+| **PostgreSQL** | localhost:5432 | Read DB（読み取りモデル） |
 
 ### 初期管理者アカウント
 
@@ -560,8 +609,8 @@ type Inventory struct {
    └─ InventoryService.AddStock()
        │
        ▼
-3. Event Store (PostgreSQL)
-   └─ INSERT INTO events (ProductCreated, StockAdded)
+3. Event Store (DynamoDB)
+   └─ PutItem events (ProductCreated, StockAdded)
        │
        ▼
 4. Kafka Producer
@@ -573,12 +622,12 @@ type Inventory struct {
        │
        ▼
 6. Projector
-   ├─ ProductCreated → INSERT INTO read_products
-   └─ StockAdded     → INSERT INTO read_inventory
+   ├─ ProductCreated → INSERT INTO read_products (PostgreSQL)
+   └─ StockAdded     → INSERT INTO read_inventory (PostgreSQL)
        │
        ▼
 7. Query Handler
-   └─ SELECT * FROM read_products
+   └─ SELECT * FROM read_products (PostgreSQL)
 ```
 
 ### 注文フロー（非同期プロジェクション）
@@ -594,8 +643,8 @@ type Inventory struct {
    └─ CartService.Clear()        → CartCleared イベント
        │
        ▼
-3. Event Store (PostgreSQL)
-   └─ INSERT INTO events (OrderPlaced, StockReserved, CartCleared)
+3. Event Store (DynamoDB)
+   └─ PutItem events (OrderPlaced, StockReserved, CartCleared)
        │
        ▼
 4. Kafka Producer
@@ -603,10 +652,10 @@ type Inventory struct {
        │
        ▼
 5. Projector (非同期)
-   ├─ OrderPlaced    → INSERT INTO read_orders
-   ├─ StockReserved  → UPDATE read_inventory (reserved += n)
-   │                 → UPDATE read_products (stock -= n)
-   └─ CartCleared    → UPDATE read_carts (items = [])
+   ├─ OrderPlaced    → INSERT INTO read_orders (PostgreSQL)
+   ├─ StockReserved  → UPDATE read_inventory (PostgreSQL)
+   │                 → UPDATE read_products (PostgreSQL)
+   └─ CartCleared    → UPDATE read_carts (PostgreSQL)
 ```
 
 ### イベントリプレイ（起動時）
@@ -616,14 +665,14 @@ API Server 起動
        │
        ▼
 Event Store から全イベント取得
-   └─ SELECT * FROM events ORDER BY created_at
+   └─ DynamoDB Query (GSI1: gsi1pk = "EVENTS")
        │
        ▼
 Projector でイベントをリプレイ
    └─ 各イベントを順番に処理
        │
        ▼
-Read DB が再構築される
+Read DB (PostgreSQL) が再構築される
    └─ read_products, read_carts, read_orders, read_inventory
        │
        ▼
@@ -822,37 +871,34 @@ func (rs *PostgresReadStore) Set(collection, id string, data any) {
 - 読み取りモデルは**クエリに最適化**された形式
 - インターフェースにより**テスト時はインメモリ**に差し替え可能
 
-### 5. イベントストア (`internal/infrastructure/store/postgres_event_store.go`)
+### 5. イベントストア (`internal/infrastructure/store/dynamo_event_store.go`)
 
 ```go
-func (es *PostgresEventStore) Append(ctx context.Context, aggregateID, aggregateType, eventType string, data any) (*Event, error) {
+func (es *DynamoEventStore) Append(ctx context.Context, aggregateID, aggregateType, eventType string, data any) (*Event, error) {
     // 1. JSONシリアライズ
     jsonData, _ := json.Marshal(data)
 
-    // 2. バージョン番号を取得（楽観的ロック）
-    var currentVersion int
-    es.db.QueryRowContext(ctx,
-        "SELECT COALESCE(MAX(version), 0) FROM events WHERE aggregate_id = $1",
-        aggregateID,
-    ).Scan(&currentVersion)
+    // 2. 次のバージョン番号を取得
+    version, _ := es.getNextVersion(ctx, aggregateID)
 
-    // 3. イベントを作成
-    event := Event{
-        ID:            uuid.New().String(),
+    // 3. DynamoDBアイテムを作成
+    item := dynamoEvent{
         AggregateID:   aggregateID,
+        Version:       version,
+        ID:            uuid.New().String(),
         AggregateType: aggregateType,
         EventType:     eventType,
-        Data:          jsonData,
-        Version:       currentVersion + 1,
-        Timestamp:     time.Now(),
+        Data:          string(jsonData),
+        CreatedAt:     time.Now().Format(time.RFC3339Nano),
+        GSI1PK:        "EVENTS", // GetAllEvents用のGSI
     }
 
-    // 4. PostgreSQLに保存
-    es.db.ExecContext(ctx,
-        `INSERT INTO events (id, aggregate_id, aggregate_type, event_type, data, version, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        event.ID, event.AggregateID, event.AggregateType, event.EventType, event.Data, event.Version, event.Timestamp,
-    )
+    // 4. DynamoDBに保存（条件付き書き込みで楽観的ロック）
+    es.client.PutItem(ctx, &dynamodb.PutItemInput{
+        TableName:           aws.String(es.tableName),
+        Item:                av,
+        ConditionExpression: aws.String("attribute_not_exists(aggregate_id) AND attribute_not_exists(version)"),
+    })
 
     // 5. Kafkaに発行
     es.producer.Publish(ctx, aggregateID, event)
@@ -863,8 +909,9 @@ func (es *PostgresEventStore) Append(ctx context.Context, aggregateID, aggregate
 
 **ポイント:**
 - **Append-Only** - イベントは追加のみ、更新・削除しない
-- **バージョン番号**で楽観的ロックを実現
-- PostgreSQL保存 → Kafka発行の**二重書き込み**
+- **条件付き書き込み**で楽観的ロックを実現（重複バージョン防止）
+- **GSI1** でGetAllEvents（全イベント取得）を効率的に実行
+- DynamoDB保存 → Kafka発行の**二重書き込み**
 
 ---
 
@@ -873,18 +920,17 @@ func (es *PostgresEventStore) Append(ctx context.Context, aggregateID, aggregate
 ### 1. イベント駆動の利点を体験する
 
 ```bash
-# イベントストア（Write DB）を確認
-docker-compose exec postgres psql -U ecapp -c \
-  "SELECT event_type, aggregate_type, created_at FROM events ORDER BY created_at;"
+# イベントストア（Write DB - DynamoDB）を確認
+# DynamoDB Admin UI (http://localhost:8001) でeventsテーブルを確認
 
-# 読み取りモデル（Read DB）を確認
+# 読み取りモデル（Read DB - PostgreSQL）を確認
 docker-compose exec postgres psql -U ecapp -c "SELECT * FROM read_products;"
 docker-compose exec postgres psql -U ecapp -c "SELECT * FROM read_inventory;"
 ```
 
 **確認ポイント:**
-- すべての操作が**イベントとして記録**されている
-- 読み取りモデルは**別テーブル**に最適化された形式で保存
+- すべての操作が**イベントとしてDynamoDBに記録**されている
+- 読み取りモデルは**PostgreSQLの別テーブル**に最適化された形式で保存
 
 ### 2. 結果整合性を体験する
 
@@ -929,16 +975,16 @@ docker-compose exec postgres psql -U ecapp -c "SELECT * FROM read_products;"
 ### 4. 書き込みDBと読み取りDBの分離を確認
 
 ```bash
-# 書き込みDB（events）のレコード数
-docker-compose exec postgres psql -U ecapp -c "SELECT COUNT(*) FROM events;"
+# 書き込みDB（DynamoDB events）のレコード数
+# DynamoDB Admin UI (http://localhost:8001) でeventsテーブルのアイテム数を確認
 
-# 読み取りDB（read_products）のレコード数
+# 読み取りDB（PostgreSQL read_products）のレコード数
 docker-compose exec postgres psql -U ecapp -c "SELECT COUNT(*) FROM read_products;"
 ```
 
 **確認ポイント:**
-- eventsには**すべてのイベント**（更新・削除含む）
-- read_productsには**現在の状態のみ**
+- DynamoDB eventsには**すべてのイベント**（更新・削除含む）
+- PostgreSQL read_productsには**現在の状態のみ**
 
 ### 5. スケーラビリティを理解する
 
