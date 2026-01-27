@@ -2,8 +2,10 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
+	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/infrastructure/store/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -251,4 +253,137 @@ func TestInventoryOperations_Sequence(t *testing.T) {
 	assert.Equal(t, EventStockReserved, eventStore.AppendCalls[1].EventType)
 	assert.Equal(t, EventStockReleased, eventStore.AppendCalls[2].EventType)
 	assert.Equal(t, EventStockDeducted, eventStore.AppendCalls[3].EventType)
+}
+
+// ============================================
+// Snapshot Tests
+// ============================================
+
+func TestInventoryService_SnapshotCreatedAtThreshold(t *testing.T) {
+	service, eventStore := newTestInventoryService()
+	ctx := context.Background()
+
+	productID := "prod-snapshot"
+
+	// Add stock 9 times
+	for i := 1; i <= 9; i++ {
+		err := service.AddStock(ctx, productID, 10)
+		require.NoError(t, err)
+	}
+
+	// Reset snapshot calls counter
+	eventStore.SaveSnapshotCalls = nil
+
+	// The 10th event should trigger a snapshot
+	err := service.AddStock(ctx, productID, 10)
+	require.NoError(t, err)
+
+	// Verify snapshot was created
+	assert.Len(t, eventStore.SaveSnapshotCalls, 1)
+	assert.Equal(t, productID, eventStore.SaveSnapshotCalls[0].Snapshot.AggregateID)
+	assert.Equal(t, 10, eventStore.SaveSnapshotCalls[0].Snapshot.Version)
+}
+
+func TestInventoryService_LoadInventoryFromSnapshot(t *testing.T) {
+	service, eventStore := newTestInventoryService()
+	ctx := context.Background()
+
+	productID := "prod-with-snapshot"
+
+	// Create a snapshot with some stock
+	snapshotState := Inventory{
+		ProductID:     productID,
+		TotalStock:    100,
+		ReservedStock: 20,
+		Version:       10,
+	}
+	stateJSON, _ := json.Marshal(snapshotState)
+	eventStore.SetSnapshot(&store.Snapshot{
+		AggregateID:   productID,
+		AggregateType: AggregateType,
+		Version:       10,
+		State:         stateJSON,
+	})
+
+	// Add more stock - this should load from snapshot first
+	err := service.AddStock(ctx, productID, 50)
+	require.NoError(t, err)
+
+	// Verify the stock added event was appended
+	assert.Len(t, eventStore.AppendCalls, 1)
+	assert.Equal(t, EventStockAdded, eventStore.AppendCalls[0].EventType)
+}
+
+func TestInventoryService_LoadInventoryFromSnapshotWithSubsequentEvents(t *testing.T) {
+	service, eventStore := newTestInventoryService()
+	ctx := context.Background()
+
+	productID := "prod-snapshot-with-events"
+
+	// Create a snapshot at version 5
+	snapshotState := Inventory{
+		ProductID:     productID,
+		TotalStock:    100,
+		ReservedStock: 0,
+		Version:       5,
+	}
+	stateJSON, _ := json.Marshal(snapshotState)
+	eventStore.SetSnapshot(&store.Snapshot{
+		AggregateID:   productID,
+		AggregateType: AggregateType,
+		Version:       5,
+		State:         stateJSON,
+	})
+
+	// Add events after the snapshot
+	eventStore.SetEvents(productID, []store.Event{
+		{
+			Version:   6,
+			EventType: EventStockReserved,
+			Data:      mustMarshalInventory(StockReserved{ProductID: productID, OrderID: "order-1", Quantity: 30}),
+		},
+	})
+
+	// Reserve more stock - this should work after loading from snapshot + events
+	err := service.Reserve(ctx, productID, "order-2", 20)
+	require.NoError(t, err)
+
+	// Verify the reserve event was appended
+	assert.Len(t, eventStore.AppendCalls, 1)
+	assert.Equal(t, EventStockReserved, eventStore.AppendCalls[0].EventType)
+}
+
+func TestInventoryService_SnapshotStateCorrectness(t *testing.T) {
+	service, eventStore := newTestInventoryService()
+	ctx := context.Background()
+
+	productID := "prod-state-test"
+
+	// Add events to build up state
+	for i := 1; i <= 9; i++ {
+		err := service.AddStock(ctx, productID, 10)
+		require.NoError(t, err)
+	}
+
+	// The 10th event should trigger a snapshot with correct state
+	err := service.AddStock(ctx, productID, 10)
+	require.NoError(t, err)
+
+	// Verify snapshot was created with correct state
+	require.Len(t, eventStore.SaveSnapshotCalls, 1)
+	snapshot := eventStore.SaveSnapshotCalls[0].Snapshot
+
+	var savedState Inventory
+	err = json.Unmarshal(snapshot.State, &savedState)
+	require.NoError(t, err)
+
+	// Total stock should be 100 (10 * 10)
+	assert.Equal(t, 100, savedState.TotalStock)
+	assert.Equal(t, 0, savedState.ReservedStock)
+	assert.Equal(t, productID, savedState.ProductID)
+}
+
+func mustMarshalInventory(v any) json.RawMessage {
+	data, _ := json.Marshal(v)
+	return data
 }

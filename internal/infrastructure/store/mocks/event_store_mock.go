@@ -12,13 +12,16 @@ import (
 
 // MockEventStore is a mock implementation of EventStoreInterface for testing
 type MockEventStore struct {
-	mu     sync.RWMutex
-	events map[string][]store.Event
+	mu        sync.RWMutex
+	events    map[string][]store.Event
+	snapshots map[string]*store.Snapshot
 
 	// For tracking calls in tests
-	AppendCalls    []AppendCall
-	AppendErr      error
-	AppendCallback func(ctx context.Context, aggregateID, aggregateType, eventType string, data any) (*store.Event, error)
+	AppendCalls       []AppendCall
+	AppendErr         error
+	AppendCallback    func(ctx context.Context, aggregateID, aggregateType, eventType string, data any) (*store.Event, error)
+	SaveSnapshotCalls []SaveSnapshotCall
+	SaveSnapshotErr   error
 }
 
 // AppendCall records parameters passed to Append
@@ -29,11 +32,18 @@ type AppendCall struct {
 	Data          any
 }
 
+// SaveSnapshotCall records parameters passed to SaveSnapshot
+type SaveSnapshotCall struct {
+	Snapshot *store.Snapshot
+}
+
 // NewMockEventStore creates a new MockEventStore
 func NewMockEventStore() *MockEventStore {
 	return &MockEventStore{
-		events:      make(map[string][]store.Event),
-		AppendCalls: make([]AppendCall, 0),
+		events:            make(map[string][]store.Event),
+		snapshots:         make(map[string]*store.Snapshot),
+		AppendCalls:       make([]AppendCall, 0),
+		SaveSnapshotCalls: make([]SaveSnapshotCall, 0),
 	}
 }
 
@@ -105,9 +115,12 @@ func (m *MockEventStore) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.events = make(map[string][]store.Event)
+	m.snapshots = make(map[string]*store.Snapshot)
 	m.AppendCalls = make([]AppendCall, 0)
+	m.SaveSnapshotCalls = make([]SaveSnapshotCall, 0)
 	m.AppendErr = nil
 	m.AppendCallback = nil
+	m.SaveSnapshotErr = nil
 }
 
 // SetEvents sets events directly for testing
@@ -140,4 +153,51 @@ func (m *MockEventStore) AddEvent(aggregateID, aggregateType, eventType string, 
 
 	m.events[aggregateID] = append(m.events[aggregateID], event)
 	return nil
+}
+
+// SaveSnapshot saves a snapshot for an aggregate
+func (m *MockEventStore) SaveSnapshot(ctx context.Context, snapshot *store.Snapshot) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Record the call
+	m.SaveSnapshotCalls = append(m.SaveSnapshotCalls, SaveSnapshotCall{
+		Snapshot: snapshot,
+	})
+
+	if m.SaveSnapshotErr != nil {
+		return m.SaveSnapshotErr
+	}
+
+	m.snapshots[snapshot.AggregateID] = snapshot
+	return nil
+}
+
+// GetSnapshot retrieves the snapshot for an aggregate
+func (m *MockEventStore) GetSnapshot(ctx context.Context, aggregateID string) (*store.Snapshot, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.snapshots[aggregateID], nil
+}
+
+// GetEventsFromVersion returns events for an aggregate starting from a specific version
+func (m *MockEventStore) GetEventsFromVersion(ctx context.Context, aggregateID string, fromVersion int) []store.Event {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	events := m.events[aggregateID]
+	result := make([]store.Event, 0)
+	for _, event := range events {
+		if event.Version > fromVersion {
+			result = append(result, event)
+		}
+	}
+	return result
+}
+
+// SetSnapshot sets a snapshot directly for testing
+func (m *MockEventStore) SetSnapshot(snapshot *store.Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.snapshots[snapshot.AggregateID] = snapshot
 }

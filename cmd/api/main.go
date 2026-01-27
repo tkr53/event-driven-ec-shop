@@ -48,6 +48,7 @@ func main() {
 
 	// DynamoDB configuration
 	dynamoTableName := getEnv("DYNAMODB_TABLE_NAME", "events")
+	dynamoSnapshotTableName := getEnv("DYNAMODB_SNAPSHOT_TABLE_NAME", "snapshots")
 	dynamoRegion := getEnv("DYNAMODB_REGION", "ap-northeast-1")
 	dynamoEndpoint := os.Getenv("DYNAMODB_ENDPOINT")
 
@@ -70,8 +71,8 @@ func main() {
 	}
 
 	// Initialize DynamoDB EventStore
-	eventStore := store.NewDynamoEventStore(dynamoClient, dynamoTableName, producer)
-	log.Printf("[API] Event Store: DynamoDB (table: %s)", dynamoTableName)
+	eventStore := store.NewDynamoEventStore(dynamoClient, dynamoTableName, dynamoSnapshotTableName, producer)
+	log.Printf("[API] Event Store: DynamoDB (events: %s, snapshots: %s)", dynamoTableName, dynamoSnapshotTableName)
 
 	// Initialize PostgreSQL connection for read store
 	db, err := store.ConnectPostgres(postgresConnStr)

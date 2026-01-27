@@ -16,9 +16,10 @@ import (
 
 // DynamoEventStore stores events in DynamoDB
 type DynamoEventStore struct {
-	client    *dynamodb.Client
-	tableName string
-	producer  *kafka.Producer
+	client            *dynamodb.Client
+	tableName         string
+	snapshotTableName string
+	producer          *kafka.Producer
 }
 
 // dynamoEvent represents the DynamoDB item structure
@@ -33,11 +34,12 @@ type dynamoEvent struct {
 	GSI1PK        string `dynamodbav:"gsi1pk"`
 }
 
-func NewDynamoEventStore(client *dynamodb.Client, tableName string, producer *kafka.Producer) *DynamoEventStore {
+func NewDynamoEventStore(client *dynamodb.Client, tableName, snapshotTableName string, producer *kafka.Producer) *DynamoEventStore {
 	return &DynamoEventStore{
-		client:    client,
-		tableName: tableName,
-		producer:  producer,
+		client:            client,
+		tableName:         tableName,
+		snapshotTableName: snapshotTableName,
+		producer:          producer,
 	}
 }
 
@@ -196,4 +198,96 @@ func (es *DynamoEventStore) unmarshalEvents(items []map[string]types.AttributeVa
 	}
 
 	return events
+}
+
+// dynamoSnapshot represents the DynamoDB item structure for snapshots
+// Stored in a separate snapshots table with aggregate_id as partition key
+type dynamoSnapshot struct {
+	AggregateID   string `dynamodbav:"aggregate_id"`
+	AggregateType string `dynamodbav:"aggregate_type"`
+	Version       int    `dynamodbav:"version"`   // Event version at snapshot time
+	State         string `dynamodbav:"state"`     // Serialized aggregate state
+	CreatedAt     string `dynamodbav:"created_at"`
+}
+
+// SaveSnapshot stores a snapshot in the dedicated snapshots table
+func (es *DynamoEventStore) SaveSnapshot(ctx context.Context, snapshot *Snapshot) error {
+	stateJSON, err := json.Marshal(snapshot.State)
+	if err != nil {
+		return fmt.Errorf("failed to marshal snapshot state: %w", err)
+	}
+
+	item := dynamoSnapshot{
+		AggregateID:   snapshot.AggregateID,
+		AggregateType: snapshot.AggregateType,
+		Version:       snapshot.Version,
+		State:         string(stateJSON),
+		CreatedAt:     snapshot.CreatedAt.Format(time.RFC3339Nano),
+	}
+
+	av, err := attributevalue.MarshalMap(item)
+	if err != nil {
+		return fmt.Errorf("failed to marshal snapshot: %w", err)
+	}
+
+	// Overwrite existing snapshot (no condition)
+	_, err = es.client.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(es.snapshotTableName),
+		Item:      av,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to put snapshot: %w", err)
+	}
+
+	return nil
+}
+
+// GetSnapshot retrieves the latest snapshot for an aggregate from the snapshots table
+func (es *DynamoEventStore) GetSnapshot(ctx context.Context, aggregateID string) (*Snapshot, error) {
+	result, err := es.client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(es.snapshotTableName),
+		Key: map[string]types.AttributeValue{
+			"aggregate_id": &types.AttributeValueMemberS{Value: aggregateID},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get snapshot: %w", err)
+	}
+
+	if result.Item == nil {
+		return nil, nil // No snapshot exists
+	}
+
+	var ds dynamoSnapshot
+	if err := attributevalue.UnmarshalMap(result.Item, &ds); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
+	}
+
+	createdAt, _ := time.Parse(time.RFC3339Nano, ds.CreatedAt)
+
+	return &Snapshot{
+		AggregateID:   ds.AggregateID,
+		AggregateType: ds.AggregateType,
+		Version:       ds.Version,
+		State:         json.RawMessage(ds.State),
+		CreatedAt:     createdAt,
+	}, nil
+}
+
+// GetEventsFromVersion returns events for an aggregate starting from a specific version
+func (es *DynamoEventStore) GetEventsFromVersion(ctx context.Context, aggregateID string, fromVersion int) []Event {
+	result, err := es.client.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String(es.tableName),
+		KeyConditionExpression: aws.String("aggregate_id = :aid AND version > :ver"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":aid": &types.AttributeValueMemberS{Value: aggregateID},
+			":ver": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", fromVersion)},
+		},
+		ScanIndexForward: aws.Bool(true), // Ascending order by version
+	})
+	if err != nil {
+		return nil
+	}
+
+	return es.unmarshalEvents(result.Items)
 }

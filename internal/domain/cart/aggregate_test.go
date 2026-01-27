@@ -2,8 +2,10 @@ package cart
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
+	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/infrastructure/store/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -225,4 +227,115 @@ func TestAddMultipleItemsSameProduct(t *testing.T) {
 
 	// Both events should be recorded (projection handles merging)
 	assert.Len(t, eventStore.AppendCalls, 2)
+}
+
+// ============================================
+// Snapshot Tests
+// ============================================
+
+func TestCartService_SnapshotCreatedAtThreshold(t *testing.T) {
+	service, eventStore := newTestCartService()
+	ctx := context.Background()
+
+	userID := "user-snapshot"
+	cartID := GetCartID(userID)
+
+	// Add 9 items first
+	for i := 1; i <= 9; i++ {
+		err := service.AddItem(ctx, userID, "prod-"+string(rune('0'+i)), 1, 100*i)
+		require.NoError(t, err)
+	}
+
+	// Reset snapshot calls counter
+	eventStore.SaveSnapshotCalls = nil
+
+	// The 10th event should trigger a snapshot
+	err := service.AddItem(ctx, userID, "prod-10", 1, 1000)
+	require.NoError(t, err)
+
+	// Verify snapshot was created
+	assert.Len(t, eventStore.SaveSnapshotCalls, 1)
+	assert.Equal(t, cartID, eventStore.SaveSnapshotCalls[0].Snapshot.AggregateID)
+	assert.Equal(t, 10, eventStore.SaveSnapshotCalls[0].Snapshot.Version)
+}
+
+func TestCartService_LoadCartFromSnapshot(t *testing.T) {
+	service, eventStore := newTestCartService()
+	ctx := context.Background()
+
+	userID := "user-with-snapshot"
+	cartID := GetCartID(userID)
+
+	// Create a snapshot with some items
+	snapshotState := Cart{
+		ID:     cartID,
+		UserID: userID,
+		Items: map[string]CartItem{
+			"prod-1": {ProductID: "prod-1", Quantity: 5, Price: 1000},
+			"prod-2": {ProductID: "prod-2", Quantity: 3, Price: 2000},
+		},
+		Version: 10,
+	}
+	stateJSON, _ := json.Marshal(snapshotState)
+	eventStore.SetSnapshot(&store.Snapshot{
+		AggregateID:   cartID,
+		AggregateType: AggregateType,
+		Version:       10,
+		State:         stateJSON,
+	})
+
+	// Clear the cart - this should load from snapshot first
+	err := service.Clear(ctx, userID)
+	require.NoError(t, err)
+
+	// Verify the clear event was appended
+	assert.Len(t, eventStore.AppendCalls, 1)
+	assert.Equal(t, EventCartCleared, eventStore.AppendCalls[0].EventType)
+}
+
+func TestCartService_LoadCartFromSnapshotWithSubsequentEvents(t *testing.T) {
+	service, eventStore := newTestCartService()
+	ctx := context.Background()
+
+	userID := "user-snapshot-with-events"
+	cartID := GetCartID(userID)
+
+	// Create a snapshot at version 5
+	snapshotState := Cart{
+		ID:     cartID,
+		UserID: userID,
+		Items: map[string]CartItem{
+			"prod-1": {ProductID: "prod-1", Quantity: 2, Price: 1000},
+		},
+		Version: 5,
+	}
+	stateJSON, _ := json.Marshal(snapshotState)
+	eventStore.SetSnapshot(&store.Snapshot{
+		AggregateID:   cartID,
+		AggregateType: AggregateType,
+		Version:       5,
+		State:         stateJSON,
+	})
+
+	// Add events after the snapshot
+	eventStore.SetEvents(cartID, []store.Event{
+		{
+			Version:   6,
+			EventType: EventItemAdded,
+			Data:      mustMarshalCart(ItemAddedToCart{CartID: cartID, UserID: userID, ProductID: "prod-2", Quantity: 1, Price: 500}),
+		},
+	})
+
+	// Add another item - this should work after loading from snapshot + events
+	err := service.AddItem(ctx, userID, "prod-3", 3, 300)
+	require.NoError(t, err)
+
+	// Verify the add event was appended
+	assert.Len(t, eventStore.AppendCalls, 1)
+	assert.Equal(t, EventItemAdded, eventStore.AppendCalls[0].EventType)
+}
+
+func mustMarshalCart(v any) json.RawMessage {
+	data, _ := json.Marshal(v)
+	return data
 }
