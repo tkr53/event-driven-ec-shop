@@ -172,6 +172,18 @@ class ApiClient {
     return this.request<Cart>('/cart');
   }
 
+  async getCartWithRetry(maxRetries = 5): Promise<Cart> {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await this.getCart();
+      } catch (error) {
+        if (i === maxRetries - 1) throw error;
+        await new Promise(r => setTimeout(r, 200 * Math.pow(2, i))); // 200ms, 400ms, 800ms...
+      }
+    }
+    throw new Error('Cart not found');
+  }
+
   async addToCart(data: AddToCartRequest): Promise<Cart> {
     return this.request<Cart>('/cart/items', {
       method: 'POST',

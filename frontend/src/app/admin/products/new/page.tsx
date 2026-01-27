@@ -22,12 +22,14 @@ export default function NewProductPage() {
     setError('');
 
     try {
-      await api.createProduct({
+      const product = await api.createProduct({
         name: formData.name,
         description: formData.description,
         price: parseInt(formData.price) || 0,
         stock: parseInt(formData.stock) || 0,
       });
+      // Save created product to sessionStorage for optimistic UI
+      sessionStorage.setItem(`product_created_${product.id}`, JSON.stringify(product));
       router.push('/admin/products');
     } catch (err) {
       setError(err instanceof Error ? err.message : '商品の作成に失敗しました');

@@ -1,50 +1,28 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Cart } from '@/types';
+import { useCart } from '@/contexts/CartContext';
 
 export default function CartPage() {
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
-  const [cart, setCart] = useState<Cart | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { cart, isLoading: cartLoading, removeFromCart, clearCart } = useCart();
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    // Redirect to login if not authenticated
-    if (!authLoading && !user) {
-      router.push('/login?redirect=/cart');
-      return;
-    }
-
-    const fetchCart = async () => {
-      try {
-        const data = await api.getCart();
-        setCart(data);
-      } catch {
-        // Cart might not exist yet, which is fine
-        setCart(null);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    if (user) {
-      fetchCart();
-    }
-  }, [user, authLoading, router]);
+  // Redirect to login if not authenticated
+  if (!authLoading && !user) {
+    router.push('/login?redirect=/cart');
+    return null;
+  }
 
   const handleRemoveItem = async (productId: string) => {
     try {
-      await api.removeFromCart(productId);
-      // Refresh cart after removing item
-      const data = await api.getCart();
-      setCart(data);
+      await removeFromCart(productId);
     } catch {
       setError('商品の削除に失敗しました');
     }
@@ -58,6 +36,8 @@ export default function CartPage() {
       const order = await api.placeOrder();
       // 注文データをsessionStorageに一時保存（Optimistic UI用）
       sessionStorage.setItem(`order_${order.id}`, JSON.stringify(order));
+      // Clear cart after successful order
+      clearCart();
       router.push(`/orders/${order.id}`);
     } catch {
       setError('注文に失敗しました。在庫が不足している可能性があります。');
@@ -72,7 +52,9 @@ export default function CartPage() {
     }).format(price);
   };
 
-  if (authLoading || isLoading) {
+  const isLoading = authLoading || cartLoading;
+
+  if (isLoading) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="flex justify-center py-12">

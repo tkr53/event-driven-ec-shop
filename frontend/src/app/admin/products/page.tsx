@@ -1,39 +1,98 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
 import type { Product } from '@/types';
 
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [pendingProducts, setPendingProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const fetchProducts = async () => {
+  // Load pending products from sessionStorage
+  const loadPendingProducts = useCallback(() => {
+    if (typeof window === 'undefined') return [];
+    const pending: Product[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith('product_created_')) {
+        try {
+          const product = JSON.parse(sessionStorage.getItem(key) || '');
+          pending.push(product);
+        } catch {
+          sessionStorage.removeItem(key!);
+        }
+      }
+    }
+    return pending;
+  }, []);
+
+  // Clear pending product from sessionStorage if it exists on server
+  const clearConfirmedProducts = useCallback((serverProducts: Product[]) => {
+    if (typeof window === 'undefined') return;
+    const serverIds = new Set(serverProducts.map(p => p.id));
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith('product_created_')) {
+        const productId = key.replace('product_created_', '');
+        if (serverIds.has(productId)) {
+          sessionStorage.removeItem(key);
+        }
+      }
+    }
+  }, []);
+
+  const fetchProducts = useCallback(async () => {
     try {
       const data = await api.getProducts();
-      setProducts(data || []);
+      const serverProducts = data || [];
+      setProducts(serverProducts);
+
+      // Clear confirmed products from sessionStorage
+      clearConfirmedProducts(serverProducts);
+
+      // Update pending products
+      const pending = loadPendingProducts();
+      const serverIds = new Set(serverProducts.map(p => p.id));
+      setPendingProducts(pending.filter(p => !serverIds.has(p.id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : '商品の取得に失敗しました');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [clearConfirmedProducts, loadPendingProducts]);
 
   useEffect(() => {
-    fetchProducts();
-  }, []);
+    // Load pending products immediately for instant display
+    const pending = loadPendingProducts();
+    setPendingProducts(pending);
 
-  const handleDelete = async (id: string) => {
+    fetchProducts();
+  }, [fetchProducts, loadPendingProducts]);
+
+  const handleDelete = async (id: string, isPending = false) => {
     if (!confirm('この商品を削除しますか？')) return;
+
+    if (isPending) {
+      // Remove from pending products
+      sessionStorage.removeItem(`product_created_${id}`);
+      setPendingProducts(pendingProducts.filter((p) => p.id !== id));
+      return;
+    }
+
+    // Optimistic update
+    const previousProducts = products;
+    setProducts(products.filter((p) => p.id !== id));
 
     try {
       await api.deleteProduct(id);
-      setProducts(products.filter((p) => p.id !== id));
     } catch (err) {
+      // Rollback on error
+      setProducts(previousProducts);
       setError(err instanceof Error ? err.message : '商品の削除に失敗しました');
     }
   };
@@ -45,15 +104,24 @@ export default function AdminProductsPage() {
     setIsSubmitting(true);
     setError('');
 
+    // Optimistic update
+    const previousProducts = products;
+    setProducts(products.map(p =>
+      p.id === editingProduct.id ? editingProduct : p
+    ));
+    setEditingProduct(null);
+
     try {
       await api.updateProduct(editingProduct.id, {
         name: editingProduct.name,
         description: editingProduct.description,
         price: editingProduct.price,
       });
-      setEditingProduct(null);
-      fetchProducts();
+      // Sync with server after delay
+      setTimeout(() => fetchProducts(), 500);
     } catch (err) {
+      // Rollback on error
+      setProducts(previousProducts);
       setError(err instanceof Error ? err.message : '商品の更新に失敗しました');
     } finally {
       setIsSubmitting(false);
@@ -169,6 +237,39 @@ export default function AdminProductsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {/* Pending products (optimistic, not yet on server) */}
+              {pendingProducts.map((product) => (
+                <tr key={`pending-${product.id}`} className="bg-yellow-50 dark:bg-yellow-900/20">
+                  <td className="px-6 py-4">
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-white flex items-center gap-2">
+                        {product.name}
+                        <span className="text-xs px-2 py-0.5 bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 rounded">
+                          同期中...
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs">{product.description}</div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-gray-900 dark:text-white">
+                    {formatPrice(product.price)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`${product.stock > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {product.stock}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    <button
+                      onClick={() => handleDelete(product.id, true)}
+                      className="text-red-600 dark:text-red-400 hover:text-red-500"
+                    >
+                      削除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {/* Confirmed products from server */}
               {products.map((product) => (
                 <tr key={product.id}>
                   <td className="px-6 py-4">
@@ -201,7 +302,7 @@ export default function AdminProductsPage() {
                   </td>
                 </tr>
               ))}
-              {products.length === 0 && (
+              {products.length === 0 && pendingProducts.length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                     商品がありません

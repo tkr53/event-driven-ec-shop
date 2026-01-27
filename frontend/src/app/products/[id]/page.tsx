@@ -4,12 +4,14 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCart } from '@/contexts/CartContext';
 import type { Product } from '@/types';
 
 export default function ProductDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
+  const { addToCart } = useCart();
   const productId = params.id as string;
 
   const [product, setProduct] = useState<Product | null>(null);
@@ -48,10 +50,7 @@ export default function ProductDetailPage() {
     setSuccessMessage('');
 
     try {
-      await api.addToCart({
-        product_id: product.id,
-        quantity,
-      });
+      await addToCart(product, quantity);
       setSuccessMessage('カートに追加しました');
     } catch {
       setError('カートへの追加に失敗しました');
