@@ -110,6 +110,7 @@ func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order,
 	for _, item := range cartModel.Items {
 		items = append(items, order.OrderItem{
 			ProductID: item.ProductID,
+			Name:      item.Name,
 			Quantity:  item.Quantity,
 			Price:     item.Price,
 		})

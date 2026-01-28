@@ -34,6 +34,7 @@ type CartReadModel struct {
 // OrderItemReadModel represents an item in an order
 type OrderItemReadModel struct {
 	ProductID string `json:"product_id"`
+	Name      string `json:"name"`
 	Quantity  int    `json:"quantity"`
 	Price     int    `json:"price"`
 }

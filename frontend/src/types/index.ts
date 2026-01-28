@@ -99,6 +99,7 @@ export interface AddToCartRequest {
 // Order types
 export interface OrderItem {
   product_id: string;
+  name: string;
   quantity: number;
   price: number;
 }

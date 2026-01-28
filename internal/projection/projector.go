@@ -239,6 +239,7 @@ func (p *Projector) handleOrderEvent(event store.Event) error {
 		for i, item := range e.Items {
 			items[i] = readmodel.OrderItemReadModel{
 				ProductID: item.ProductID,
+				Name:      item.Name,
 				Quantity:  item.Quantity,
 				Price:     item.Price,
 			}

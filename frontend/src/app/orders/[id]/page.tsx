@@ -210,7 +210,7 @@ export default function OrderDetailPage() {
                     href={`/products/${item.product_id}`}
                     className="text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400"
                   >
-                    商品ID: {item.product_id}
+                    {item.name || `商品ID: ${item.product_id}`}
                   </Link>
                   <div className="text-sm text-gray-500 dark:text-gray-400">
                     {formatPrice(item.price)} × {item.quantity}
