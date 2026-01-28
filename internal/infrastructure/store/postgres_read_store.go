@@ -21,27 +21,28 @@ func NewPostgresReadStore(db *sql.DB) *PostgresReadStore {
 }
 
 // Set stores a read model
-func (rs *PostgresReadStore) Set(collection, id string, data any) {
+func (rs *PostgresReadStore) Set(collection, id string, data any) error {
 	switch collection {
 	case "products":
-		rs.setProduct(id, data.(*readmodel.ProductReadModel))
+		return rs.setProduct(id, data.(*readmodel.ProductReadModel))
 	case "carts":
-		rs.setCart(id, data.(*readmodel.CartReadModel))
+		return rs.setCart(id, data.(*readmodel.CartReadModel))
 	case "orders":
-		rs.setOrder(id, data.(*readmodel.OrderReadModel))
+		return rs.setOrder(id, data.(*readmodel.OrderReadModel))
 	case "inventory":
-		rs.setInventory(id, data.(*readmodel.InventoryReadModel))
+		return rs.setInventory(id, data.(*readmodel.InventoryReadModel))
 	case "users":
-		rs.setUser(id, data.(*readmodel.UserReadModel))
+		return rs.setUser(id, data.(*readmodel.UserReadModel))
 	case "sessions":
-		rs.setSession(id, data.(*readmodel.SessionReadModel))
+		return rs.setSession(id, data.(*readmodel.SessionReadModel))
 	case "categories":
-		rs.setCategory(id, data.(*readmodel.CategoryReadModel))
+		return rs.setCategory(id, data.(*readmodel.CategoryReadModel))
 	}
+	return fmt.Errorf("unknown collection: %s", collection)
 }
 
 // Get retrieves a read model by id
-func (rs *PostgresReadStore) Get(collection, id string) (any, bool) {
+func (rs *PostgresReadStore) Get(collection, id string) (any, bool, error) {
 	switch collection {
 	case "products":
 		return rs.getProduct(id)
@@ -58,11 +59,11 @@ func (rs *PostgresReadStore) Get(collection, id string) (any, bool) {
 	case "categories":
 		return rs.getCategory(id)
 	}
-	return nil, false
+	return nil, false, fmt.Errorf("unknown collection: %s", collection)
 }
 
 // GetAll retrieves all items in a collection
-func (rs *PostgresReadStore) GetAll(collection string) []any {
+func (rs *PostgresReadStore) GetAll(collection string) ([]any, error) {
 	switch collection {
 	case "products":
 		return rs.getAllProducts()
@@ -79,11 +80,11 @@ func (rs *PostgresReadStore) GetAll(collection string) []any {
 	case "categories":
 		return rs.getAllCategories()
 	}
-	return nil
+	return nil, fmt.Errorf("unknown collection: %s", collection)
 }
 
 // Delete removes a read model
-func (rs *PostgresReadStore) Delete(collection, id string) {
+func (rs *PostgresReadStore) Delete(collection, id string) error {
 	var tableName string
 	switch collection {
 	case "products":
@@ -101,40 +102,48 @@ func (rs *PostgresReadStore) Delete(collection, id string) {
 	case "categories":
 		tableName = "read_categories"
 	default:
-		return
+		return fmt.Errorf("unknown collection: %s", collection)
 	}
 
 	_, err := rs.db.Exec("DELETE FROM "+tableName+" WHERE id = $1", id)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error deleting from %s: %v", collection, err)
+		return fmt.Errorf("delete from %s: %w", collection, err)
 	}
+	return nil
 }
 
 // Update modifies a read model using an update function
-func (rs *PostgresReadStore) Update(collection, id string, updateFn func(current any) any) bool {
+func (rs *PostgresReadStore) Update(collection, id string, updateFn func(current any) any) (bool, error) {
 	// Get current value
 	var current any
 	var found bool
+	var err error
 
 	switch collection {
 	case "products":
-		current, found = rs.getProduct(id)
+		current, found, err = rs.getProduct(id)
 	case "carts":
-		current, found = rs.getCart(id)
+		current, found, err = rs.getCart(id)
 	case "orders":
-		current, found = rs.getOrder(id)
+		current, found, err = rs.getOrder(id)
 	case "inventory":
-		current, found = rs.getInventory(id)
+		current, found, err = rs.getInventory(id)
 	case "users":
-		current, found = rs.getUser(id)
+		current, found, err = rs.getUser(id)
 	case "sessions":
-		current, found = rs.getSession(id)
+		current, found, err = rs.getSession(id)
 	case "categories":
-		current, found = rs.getCategory(id)
+		current, found, err = rs.getCategory(id)
+	default:
+		return false, fmt.Errorf("unknown collection: %s", collection)
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("get %s: %w", collection, err)
 	}
 
 	if !found {
-		return false
+		return false, nil
 	}
 
 	// Apply update function
@@ -143,26 +152,30 @@ func (rs *PostgresReadStore) Update(collection, id string, updateFn func(current
 	// Save updated value
 	switch collection {
 	case "products":
-		rs.setProduct(id, updated.(*readmodel.ProductReadModel))
+		err = rs.setProduct(id, updated.(*readmodel.ProductReadModel))
 	case "carts":
-		rs.setCart(id, updated.(*readmodel.CartReadModel))
+		err = rs.setCart(id, updated.(*readmodel.CartReadModel))
 	case "orders":
-		rs.setOrder(id, updated.(*readmodel.OrderReadModel))
+		err = rs.setOrder(id, updated.(*readmodel.OrderReadModel))
 	case "inventory":
-		rs.setInventory(id, updated.(*readmodel.InventoryReadModel))
+		err = rs.setInventory(id, updated.(*readmodel.InventoryReadModel))
 	case "users":
-		rs.setUser(id, updated.(*readmodel.UserReadModel))
+		err = rs.setUser(id, updated.(*readmodel.UserReadModel))
 	case "sessions":
-		rs.setSession(id, updated.(*readmodel.SessionReadModel))
+		err = rs.setSession(id, updated.(*readmodel.SessionReadModel))
 	case "categories":
-		rs.setCategory(id, updated.(*readmodel.CategoryReadModel))
+		err = rs.setCategory(id, updated.(*readmodel.CategoryReadModel))
 	}
 
-	return true
+	if err != nil {
+		return false, fmt.Errorf("set %s: %w", collection, err)
+	}
+
+	return true, nil
 }
 
 // Product operations
-func (rs *PostgresReadStore) setProduct(id string, p *readmodel.ProductReadModel) {
+func (rs *PostgresReadStore) setProduct(id string, p *readmodel.ProductReadModel) error {
 	_, err := rs.db.Exec(`
 		INSERT INTO read_products (id, name, description, price, stock, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -173,34 +186,31 @@ func (rs *PostgresReadStore) setProduct(id string, p *readmodel.ProductReadModel
 			stock = EXCLUDED.stock,
 			updated_at = EXCLUDED.updated_at
 	`, p.ID, p.Name, p.Description, p.Price, p.Stock, p.CreatedAt, p.UpdatedAt)
-	if err != nil {
-		log.Printf("[PostgresReadStore] Error setting product: %v", err)
-	}
+	return err
 }
 
-func (rs *PostgresReadStore) getProduct(id string) (*readmodel.ProductReadModel, bool) {
+func (rs *PostgresReadStore) getProduct(id string) (*readmodel.ProductReadModel, bool, error) {
 	var p readmodel.ProductReadModel
 	err := rs.db.QueryRow(`
 		SELECT id, name, description, price, stock, created_at, updated_at
 		FROM read_products WHERE id = $1
 	`, id).Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.Stock, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[PostgresReadStore] Error getting product: %v", err)
+		if err == sql.ErrNoRows {
+			return nil, false, nil
 		}
-		return nil, false
+		return nil, false, err
 	}
-	return &p, true
+	return &p, true, nil
 }
 
-func (rs *PostgresReadStore) getAllProducts() []any {
+func (rs *PostgresReadStore) getAllProducts() ([]any, error) {
 	rows, err := rs.db.Query(`
 		SELECT id, name, description, price, stock, created_at, updated_at
 		FROM read_products ORDER BY created_at DESC
 	`)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error getting all products: %v", err)
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -208,18 +218,20 @@ func (rs *PostgresReadStore) getAllProducts() []any {
 	for rows.Next() {
 		var p readmodel.ProductReadModel
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.Stock, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			log.Printf("[PostgresReadStore] Error scanning product: %v", err)
-			continue
+			return nil, err
 		}
 		products = append(products, &p)
 	}
-	return products
+	return products, rows.Err()
 }
 
 // Cart operations
-func (rs *PostgresReadStore) setCart(id string, c *readmodel.CartReadModel) {
-	itemsJSON, _ := json.Marshal(c.Items)
-	_, err := rs.db.Exec(`
+func (rs *PostgresReadStore) setCart(id string, c *readmodel.CartReadModel) error {
+	itemsJSON, err := json.Marshal(c.Items)
+	if err != nil {
+		return err
+	}
+	_, err = rs.db.Exec(`
 		INSERT INTO read_carts (id, user_id, items, total, updated_at)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (id) DO UPDATE SET
@@ -227,32 +239,31 @@ func (rs *PostgresReadStore) setCart(id string, c *readmodel.CartReadModel) {
 			total = EXCLUDED.total,
 			updated_at = EXCLUDED.updated_at
 	`, c.ID, c.UserID, itemsJSON, c.Total, time.Now())
-	if err != nil {
-		log.Printf("[PostgresReadStore] Error setting cart: %v", err)
-	}
+	return err
 }
 
-func (rs *PostgresReadStore) getCart(id string) (*readmodel.CartReadModel, bool) {
+func (rs *PostgresReadStore) getCart(id string) (*readmodel.CartReadModel, bool, error) {
 	var c readmodel.CartReadModel
 	var itemsJSON []byte
 	err := rs.db.QueryRow(`
 		SELECT id, user_id, items, total FROM read_carts WHERE id = $1
 	`, id).Scan(&c.ID, &c.UserID, &itemsJSON, &c.Total)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[PostgresReadStore] Error getting cart: %v", err)
+		if err == sql.ErrNoRows {
+			return nil, false, nil
 		}
-		return nil, false
+		return nil, false, err
 	}
-	json.Unmarshal(itemsJSON, &c.Items)
-	return &c, true
+	if err := json.Unmarshal(itemsJSON, &c.Items); err != nil {
+		return nil, false, err
+	}
+	return &c, true, nil
 }
 
-func (rs *PostgresReadStore) getAllCarts() []any {
+func (rs *PostgresReadStore) getAllCarts() ([]any, error) {
 	rows, err := rs.db.Query(`SELECT id, user_id, items, total FROM read_carts`)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error getting all carts: %v", err)
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -261,19 +272,23 @@ func (rs *PostgresReadStore) getAllCarts() []any {
 		var c readmodel.CartReadModel
 		var itemsJSON []byte
 		if err := rows.Scan(&c.ID, &c.UserID, &itemsJSON, &c.Total); err != nil {
-			log.Printf("[PostgresReadStore] Error scanning cart: %v", err)
-			continue
+			return nil, err
 		}
-		json.Unmarshal(itemsJSON, &c.Items)
+		if err := json.Unmarshal(itemsJSON, &c.Items); err != nil {
+			return nil, err
+		}
 		carts = append(carts, &c)
 	}
-	return carts
+	return carts, rows.Err()
 }
 
 // Order operations
-func (rs *PostgresReadStore) setOrder(id string, o *readmodel.OrderReadModel) {
-	itemsJSON, _ := json.Marshal(o.Items)
-	_, err := rs.db.Exec(`
+func (rs *PostgresReadStore) setOrder(id string, o *readmodel.OrderReadModel) error {
+	itemsJSON, err := json.Marshal(o.Items)
+	if err != nil {
+		return err
+	}
+	_, err = rs.db.Exec(`
 		INSERT INTO read_orders (id, user_id, items, total, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (id) DO UPDATE SET
@@ -282,12 +297,10 @@ func (rs *PostgresReadStore) setOrder(id string, o *readmodel.OrderReadModel) {
 			status = EXCLUDED.status,
 			updated_at = EXCLUDED.updated_at
 	`, o.ID, o.UserID, itemsJSON, o.Total, o.Status, o.CreatedAt, o.UpdatedAt)
-	if err != nil {
-		log.Printf("[PostgresReadStore] Error setting order: %v", err)
-	}
+	return err
 }
 
-func (rs *PostgresReadStore) getOrder(id string) (*readmodel.OrderReadModel, bool) {
+func (rs *PostgresReadStore) getOrder(id string) (*readmodel.OrderReadModel, bool, error) {
 	var o readmodel.OrderReadModel
 	var itemsJSON []byte
 	err := rs.db.QueryRow(`
@@ -295,23 +308,24 @@ func (rs *PostgresReadStore) getOrder(id string) (*readmodel.OrderReadModel, boo
 		FROM read_orders WHERE id = $1
 	`, id).Scan(&o.ID, &o.UserID, &itemsJSON, &o.Total, &o.Status, &o.CreatedAt, &o.UpdatedAt)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[PostgresReadStore] Error getting order: %v", err)
+		if err == sql.ErrNoRows {
+			return nil, false, nil
 		}
-		return nil, false
+		return nil, false, err
 	}
-	json.Unmarshal(itemsJSON, &o.Items)
-	return &o, true
+	if err := json.Unmarshal(itemsJSON, &o.Items); err != nil {
+		return nil, false, err
+	}
+	return &o, true, nil
 }
 
-func (rs *PostgresReadStore) getAllOrders() []any {
+func (rs *PostgresReadStore) getAllOrders() ([]any, error) {
 	rows, err := rs.db.Query(`
 		SELECT id, user_id, items, total, status, created_at, updated_at
 		FROM read_orders ORDER BY created_at DESC
 	`)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error getting all orders: %v", err)
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -320,17 +334,18 @@ func (rs *PostgresReadStore) getAllOrders() []any {
 		var o readmodel.OrderReadModel
 		var itemsJSON []byte
 		if err := rows.Scan(&o.ID, &o.UserID, &itemsJSON, &o.Total, &o.Status, &o.CreatedAt, &o.UpdatedAt); err != nil {
-			log.Printf("[PostgresReadStore] Error scanning order: %v", err)
-			continue
+			return nil, err
 		}
-		json.Unmarshal(itemsJSON, &o.Items)
+		if err := json.Unmarshal(itemsJSON, &o.Items); err != nil {
+			return nil, err
+		}
 		orders = append(orders, &o)
 	}
-	return orders
+	return orders, rows.Err()
 }
 
 // Inventory operations
-func (rs *PostgresReadStore) setInventory(id string, inv *readmodel.InventoryReadModel) {
+func (rs *PostgresReadStore) setInventory(id string, inv *readmodel.InventoryReadModel) error {
 	_, err := rs.db.Exec(`
 		INSERT INTO read_inventory (product_id, total_stock, reserved_stock, available_stock, updated_at)
 		VALUES ($1, $2, $3, $4, $5)
@@ -340,33 +355,30 @@ func (rs *PostgresReadStore) setInventory(id string, inv *readmodel.InventoryRea
 			available_stock = EXCLUDED.available_stock,
 			updated_at = EXCLUDED.updated_at
 	`, inv.ProductID, inv.TotalStock, inv.ReservedStock, inv.AvailableStock, time.Now())
-	if err != nil {
-		log.Printf("[PostgresReadStore] Error setting inventory: %v", err)
-	}
+	return err
 }
 
-func (rs *PostgresReadStore) getInventory(id string) (*readmodel.InventoryReadModel, bool) {
+func (rs *PostgresReadStore) getInventory(id string) (*readmodel.InventoryReadModel, bool, error) {
 	var inv readmodel.InventoryReadModel
 	err := rs.db.QueryRow(`
 		SELECT product_id, total_stock, reserved_stock, available_stock
 		FROM read_inventory WHERE product_id = $1
 	`, id).Scan(&inv.ProductID, &inv.TotalStock, &inv.ReservedStock, &inv.AvailableStock)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[PostgresReadStore] Error getting inventory: %v", err)
+		if err == sql.ErrNoRows {
+			return nil, false, nil
 		}
-		return nil, false
+		return nil, false, err
 	}
-	return &inv, true
+	return &inv, true, nil
 }
 
-func (rs *PostgresReadStore) getAllInventory() []any {
+func (rs *PostgresReadStore) getAllInventory() ([]any, error) {
 	rows, err := rs.db.Query(`
 		SELECT product_id, total_stock, reserved_stock, available_stock FROM read_inventory
 	`)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error getting all inventory: %v", err)
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -374,16 +386,15 @@ func (rs *PostgresReadStore) getAllInventory() []any {
 	for rows.Next() {
 		var inv readmodel.InventoryReadModel
 		if err := rows.Scan(&inv.ProductID, &inv.TotalStock, &inv.ReservedStock, &inv.AvailableStock); err != nil {
-			log.Printf("[PostgresReadStore] Error scanning inventory: %v", err)
-			continue
+			return nil, err
 		}
 		inventory = append(inventory, &inv)
 	}
-	return inventory
+	return inventory, rows.Err()
 }
 
 // User operations
-func (rs *PostgresReadStore) setUser(id string, u *readmodel.UserReadModel) {
+func (rs *PostgresReadStore) setUser(id string, u *readmodel.UserReadModel) error {
 	_, err := rs.db.Exec(`
 		INSERT INTO read_users (id, email, password_hash, name, role, is_active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -395,24 +406,22 @@ func (rs *PostgresReadStore) setUser(id string, u *readmodel.UserReadModel) {
 			is_active = EXCLUDED.is_active,
 			updated_at = EXCLUDED.updated_at
 	`, u.ID, u.Email, u.PasswordHash, u.Name, u.Role, u.IsActive, u.CreatedAt, u.UpdatedAt)
-	if err != nil {
-		log.Printf("[PostgresReadStore] Error setting user: %v", err)
-	}
+	return err
 }
 
-func (rs *PostgresReadStore) getUser(id string) (*readmodel.UserReadModel, bool) {
+func (rs *PostgresReadStore) getUser(id string) (*readmodel.UserReadModel, bool, error) {
 	var u readmodel.UserReadModel
 	err := rs.db.QueryRow(`
 		SELECT id, email, password_hash, name, role, is_active, created_at, updated_at
 		FROM read_users WHERE id = $1
 	`, id).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Name, &u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[PostgresReadStore] Error getting user: %v", err)
+		if err == sql.ErrNoRows {
+			return nil, false, nil
 		}
-		return nil, false
+		return nil, false, err
 	}
-	return &u, true
+	return &u, true, nil
 }
 
 // GetUserByEmail retrieves a user by email
@@ -423,22 +432,18 @@ func (rs *PostgresReadStore) GetUserByEmail(email string) (*readmodel.UserReadMo
 		FROM read_users WHERE email = $1
 	`, email).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Name, &u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[PostgresReadStore] Error getting user by email: %v", err)
-		}
 		return nil, false
 	}
 	return &u, true
 }
 
-func (rs *PostgresReadStore) getAllUsers() []any {
+func (rs *PostgresReadStore) getAllUsers() ([]any, error) {
 	rows, err := rs.db.Query(`
 		SELECT id, email, password_hash, name, role, is_active, created_at, updated_at
 		FROM read_users ORDER BY created_at DESC
 	`)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error getting all users: %v", err)
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -446,16 +451,15 @@ func (rs *PostgresReadStore) getAllUsers() []any {
 	for rows.Next() {
 		var u readmodel.UserReadModel
 		if err := rows.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Name, &u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt); err != nil {
-			log.Printf("[PostgresReadStore] Error scanning user: %v", err)
-			continue
+			return nil, err
 		}
 		users = append(users, &u)
 	}
-	return users
+	return users, rows.Err()
 }
 
 // Session operations
-func (rs *PostgresReadStore) setSession(id string, s *readmodel.SessionReadModel) {
+func (rs *PostgresReadStore) setSession(id string, s *readmodel.SessionReadModel) error {
 	_, err := rs.db.Exec(`
 		INSERT INTO user_sessions (id, user_id, refresh_token_hash, expires_at, created_at, ip_address, user_agent)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -463,24 +467,22 @@ func (rs *PostgresReadStore) setSession(id string, s *readmodel.SessionReadModel
 			refresh_token_hash = EXCLUDED.refresh_token_hash,
 			expires_at = EXCLUDED.expires_at
 	`, s.ID, s.UserID, s.RefreshTokenHash, s.ExpiresAt, s.CreatedAt, s.IPAddress, s.UserAgent)
-	if err != nil {
-		log.Printf("[PostgresReadStore] Error setting session: %v", err)
-	}
+	return err
 }
 
-func (rs *PostgresReadStore) getSession(id string) (*readmodel.SessionReadModel, bool) {
+func (rs *PostgresReadStore) getSession(id string) (*readmodel.SessionReadModel, bool, error) {
 	var s readmodel.SessionReadModel
 	err := rs.db.QueryRow(`
 		SELECT id, user_id, refresh_token_hash, expires_at, created_at, ip_address, user_agent
 		FROM user_sessions WHERE id = $1
 	`, id).Scan(&s.ID, &s.UserID, &s.RefreshTokenHash, &s.ExpiresAt, &s.CreatedAt, &s.IPAddress, &s.UserAgent)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[PostgresReadStore] Error getting session: %v", err)
+		if err == sql.ErrNoRows {
+			return nil, false, nil
 		}
-		return nil, false
+		return nil, false, err
 	}
-	return &s, true
+	return &s, true, nil
 }
 
 // GetSessionByUserID retrieves a session by user ID
@@ -492,38 +494,30 @@ func (rs *PostgresReadStore) GetSessionByUserID(userID string) (*readmodel.Sessi
 		ORDER BY created_at DESC LIMIT 1
 	`, userID).Scan(&s.ID, &s.UserID, &s.RefreshTokenHash, &s.ExpiresAt, &s.CreatedAt, &s.IPAddress, &s.UserAgent)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[PostgresReadStore] Error getting session by user ID: %v", err)
-		}
 		return nil, false
 	}
 	return &s, true
 }
 
 // DeleteSessionsByUserID deletes all sessions for a user
-func (rs *PostgresReadStore) DeleteSessionsByUserID(userID string) {
+func (rs *PostgresReadStore) DeleteSessionsByUserID(userID string) error {
 	_, err := rs.db.Exec(`DELETE FROM user_sessions WHERE user_id = $1`, userID)
-	if err != nil {
-		log.Printf("[PostgresReadStore] Error deleting sessions: %v", err)
-	}
+	return err
 }
 
 // DeleteExpiredSessions removes expired sessions
-func (rs *PostgresReadStore) DeleteExpiredSessions() {
+func (rs *PostgresReadStore) DeleteExpiredSessions() error {
 	_, err := rs.db.Exec(`DELETE FROM user_sessions WHERE expires_at < NOW()`)
-	if err != nil {
-		log.Printf("[PostgresReadStore] Error deleting expired sessions: %v", err)
-	}
+	return err
 }
 
-func (rs *PostgresReadStore) getAllSessions() []any {
+func (rs *PostgresReadStore) getAllSessions() ([]any, error) {
 	rows, err := rs.db.Query(`
 		SELECT id, user_id, refresh_token_hash, expires_at, created_at, ip_address, user_agent
 		FROM user_sessions ORDER BY created_at DESC
 	`)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error getting all sessions: %v", err)
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -531,16 +525,15 @@ func (rs *PostgresReadStore) getAllSessions() []any {
 	for rows.Next() {
 		var s readmodel.SessionReadModel
 		if err := rows.Scan(&s.ID, &s.UserID, &s.RefreshTokenHash, &s.ExpiresAt, &s.CreatedAt, &s.IPAddress, &s.UserAgent); err != nil {
-			log.Printf("[PostgresReadStore] Error scanning session: %v", err)
-			continue
+			return nil, err
 		}
 		sessions = append(sessions, &s)
 	}
-	return sessions
+	return sessions, rows.Err()
 }
 
 // Category operations
-func (rs *PostgresReadStore) setCategory(id string, c *readmodel.CategoryReadModel) {
+func (rs *PostgresReadStore) setCategory(id string, c *readmodel.CategoryReadModel) error {
 	_, err := rs.db.Exec(`
 		INSERT INTO read_categories (id, name, slug, description, parent_id, sort_order, is_active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -553,12 +546,10 @@ func (rs *PostgresReadStore) setCategory(id string, c *readmodel.CategoryReadMod
 			is_active = EXCLUDED.is_active,
 			updated_at = EXCLUDED.updated_at
 	`, c.ID, c.Name, c.Slug, c.Description, nullString(c.ParentID), c.SortOrder, c.IsActive, c.CreatedAt, c.UpdatedAt)
-	if err != nil {
-		log.Printf("[PostgresReadStore] Error setting category: %v", err)
-	}
+	return err
 }
 
-func (rs *PostgresReadStore) getCategory(id string) (*readmodel.CategoryReadModel, bool) {
+func (rs *PostgresReadStore) getCategory(id string) (*readmodel.CategoryReadModel, bool, error) {
 	var c readmodel.CategoryReadModel
 	var parentID sql.NullString
 	err := rs.db.QueryRow(`
@@ -566,13 +557,13 @@ func (rs *PostgresReadStore) getCategory(id string) (*readmodel.CategoryReadMode
 		FROM read_categories WHERE id = $1
 	`, id).Scan(&c.ID, &c.Name, &c.Slug, &c.Description, &parentID, &c.SortOrder, &c.IsActive, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[PostgresReadStore] Error getting category: %v", err)
+		if err == sql.ErrNoRows {
+			return nil, false, nil
 		}
-		return nil, false
+		return nil, false, err
 	}
 	c.ParentID = parentID.String
-	return &c, true
+	return &c, true, nil
 }
 
 // GetCategoryBySlug retrieves a category by its slug
@@ -584,23 +575,19 @@ func (rs *PostgresReadStore) GetCategoryBySlug(slug string) (*readmodel.Category
 		FROM read_categories WHERE slug = $1 AND is_active = true
 	`, slug).Scan(&c.ID, &c.Name, &c.Slug, &c.Description, &parentID, &c.SortOrder, &c.IsActive, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[PostgresReadStore] Error getting category by slug: %v", err)
-		}
 		return nil, false
 	}
 	c.ParentID = parentID.String
 	return &c, true
 }
 
-func (rs *PostgresReadStore) getAllCategories() []any {
+func (rs *PostgresReadStore) getAllCategories() ([]any, error) {
 	rows, err := rs.db.Query(`
 		SELECT id, name, slug, description, parent_id, sort_order, is_active, created_at, updated_at
 		FROM read_categories WHERE is_active = true ORDER BY sort_order, name
 	`)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error getting all categories: %v", err)
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -609,13 +596,12 @@ func (rs *PostgresReadStore) getAllCategories() []any {
 		var c readmodel.CategoryReadModel
 		var parentID sql.NullString
 		if err := rows.Scan(&c.ID, &c.Name, &c.Slug, &c.Description, &parentID, &c.SortOrder, &c.IsActive, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			log.Printf("[PostgresReadStore] Error scanning category: %v", err)
-			continue
+			return nil, err
 		}
 		c.ParentID = parentID.String
 		categories = append(categories, &c)
 	}
-	return categories
+	return categories, rows.Err()
 }
 
 // Product-Category relationship operations

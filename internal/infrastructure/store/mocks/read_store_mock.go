@@ -53,7 +53,7 @@ func NewMockReadStore() *MockReadStore {
 }
 
 // Set stores a read model
-func (m *MockReadStore) Set(collection, id string, data any) {
+func (m *MockReadStore) Set(collection, id string, data any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -67,10 +67,11 @@ func (m *MockReadStore) Set(collection, id string, data any) {
 		m.data[collection] = make(map[string]any)
 	}
 	m.data[collection][id] = data
+	return nil
 }
 
 // Get retrieves a read model by id
-func (m *MockReadStore) Get(collection, id string) (any, bool) {
+func (m *MockReadStore) Get(collection, id string) (any, bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -80,30 +81,30 @@ func (m *MockReadStore) Get(collection, id string) (any, bool) {
 	})
 
 	if m.data[collection] == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	data, ok := m.data[collection][id]
-	return data, ok
+	return data, ok, nil
 }
 
 // GetAll retrieves all items in a collection
-func (m *MockReadStore) GetAll(collection string) []any {
+func (m *MockReadStore) GetAll(collection string) ([]any, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	if m.data[collection] == nil {
-		return []any{}
+		return []any{}, nil
 	}
 
 	items := make([]any, 0, len(m.data[collection]))
 	for _, item := range m.data[collection] {
 		items = append(items, item)
 	}
-	return items
+	return items, nil
 }
 
 // Delete removes a read model
-func (m *MockReadStore) Delete(collection, id string) {
+func (m *MockReadStore) Delete(collection, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -115,10 +116,11 @@ func (m *MockReadStore) Delete(collection, id string) {
 	if m.data[collection] != nil {
 		delete(m.data[collection], id)
 	}
+	return nil
 }
 
 // Update modifies a read model using an update function
-func (m *MockReadStore) Update(collection, id string, updateFn func(current any) any) bool {
+func (m *MockReadStore) Update(collection, id string, updateFn func(current any) any) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -128,14 +130,14 @@ func (m *MockReadStore) Update(collection, id string, updateFn func(current any)
 	})
 
 	if m.data[collection] == nil {
-		return false
+		return false, nil
 	}
 	current, ok := m.data[collection][id]
 	if !ok {
-		return false
+		return false, nil
 	}
 	m.data[collection][id] = updateFn(current)
-	return true
+	return true, nil
 }
 
 // Reset clears all data and recorded calls

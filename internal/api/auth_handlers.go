@@ -200,8 +200,8 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate session exists and is not expired
-	sessionData, exists := h.readStore.Get("sessions", sessionCookie.Value)
-	if !exists {
+	sessionData, exists, err := h.readStore.Get("sessions", sessionCookie.Value)
+	if err != nil || !exists {
 		h.clearAuthCookies(w)
 		respondJSONError(w, "Session not found", http.StatusUnauthorized)
 		return
@@ -225,8 +225,8 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user
-	userData, exists := h.readStore.Get("users", userID)
-	if !exists {
+	userData, exists, err := h.readStore.Get("users", userID)
+	if err != nil || !exists {
 		h.clearAuthCookies(w)
 		respondJSONError(w, "User not found", http.StatusUnauthorized)
 		return
@@ -258,8 +258,8 @@ func (h *AuthHandlers) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userData, exists := h.readStore.Get("users", claims.UserID)
-	if !exists {
+	userData, exists, err := h.readStore.Get("users", claims.UserID)
+	if err != nil || !exists {
 		respondJSONError(w, "User not found", http.StatusNotFound)
 		return
 	}
@@ -293,8 +293,8 @@ func (h *AuthHandlers) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user and verify current password
-	userData, exists := h.readStore.Get("users", claims.UserID)
-	if !exists {
+	userData, exists, err := h.readStore.Get("users", claims.UserID)
+	if err != nil || !exists {
 		respondJSONError(w, "User not found", http.StatusNotFound)
 		return
 	}

@@ -51,7 +51,11 @@ func (h *Handler) handleOrderPlaced(event store.Event) error {
 	log.Printf("[Notifier] Processing OrderPlaced event for order %s, user %s", e.OrderID, e.UserID)
 
 	// Get user information from read store
-	userData, exists := h.readStore.Get("users", e.UserID)
+	userData, exists, err := h.readStore.Get("users", e.UserID)
+	if err != nil {
+		log.Printf("[Notifier] Error getting user %s: %v", e.UserID, err)
+		return nil
+	}
 	if !exists {
 		log.Printf("[Notifier] User not found: %s", e.UserID)
 		return nil
@@ -68,7 +72,7 @@ func (h *Handler) handleOrderPlaced(event store.Event) error {
 	for i, item := range e.Items {
 		// Try to get product name from read store
 		productName := item.ProductID
-		if productData, exists := h.readStore.Get("products", item.ProductID); exists {
+		if productData, exists, _ := h.readStore.Get("products", item.ProductID); exists {
 			if product, ok := productData.(*readmodel.ProductReadModel); ok {
 				productName = product.Name
 			}

@@ -10,7 +10,7 @@ import (
 	"github.com/example/ec-event-driven/internal/domain/order"
 	"github.com/example/ec-event-driven/internal/domain/product"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
-	"github.com/example/ec-event-driven/internal/query"
+	"github.com/example/ec-event-driven/internal/readmodel"
 )
 
 type Handler struct {
@@ -67,11 +67,15 @@ func (h *Handler) DeleteProduct(ctx context.Context, cmd DeleteProduct) error {
 // AddToCart adds an item to cart
 func (h *Handler) AddToCart(ctx context.Context, cmd AddToCart) error {
 	// Get product price from read store
-	p, ok := h.readStore.Get("products", cmd.ProductID)
+	p, ok, err := h.readStore.Get("products", cmd.ProductID)
+	if err != nil {
+		log.Printf("[Command] Error getting product %s: %v", cmd.ProductID, err)
+		return product.ErrProductNotFound
+	}
 	if !ok {
 		return product.ErrProductNotFound
 	}
-	prod := p.(*query.ProductReadModel)
+	prod := p.(*readmodel.ProductReadModel)
 
 	// Emit ItemAddedToCart event
 	return h.cartSvc.AddItem(ctx, cmd.UserID, cmd.ProductID, cmd.Quantity, prod.Price)
@@ -91,11 +95,15 @@ func (h *Handler) ClearCart(ctx context.Context, cmd ClearCart) error {
 func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order, error) {
 	// Get cart from read store
 	cartID := cart.GetCartID(cmd.UserID)
-	c, ok := h.readStore.Get("carts", cartID)
-	if !ok || len(c.(*query.CartReadModel).Items) == 0 {
+	c, ok, err := h.readStore.Get("carts", cartID)
+	if err != nil {
+		log.Printf("[Command] Error getting cart %s: %v", cartID, err)
 		return nil, order.ErrEmptyOrder
 	}
-	cartModel := c.(*query.CartReadModel)
+	if !ok || len(c.(*readmodel.CartReadModel).Items) == 0 {
+		return nil, order.ErrEmptyOrder
+	}
+	cartModel := c.(*readmodel.CartReadModel)
 
 	// Convert cart items to order items
 	var items []order.OrderItem
@@ -109,11 +117,15 @@ func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order,
 
 	// Validate stock availability for all items before placing order
 	for _, item := range items {
-		inv, ok := h.readStore.Get("inventory", item.ProductID)
+		inv, ok, err := h.readStore.Get("inventory", item.ProductID)
+		if err != nil {
+			log.Printf("[Command] Error getting inventory for product %s: %v", item.ProductID, err)
+			return nil, fmt.Errorf("inventory not found for product %s", item.ProductID)
+		}
 		if !ok {
 			return nil, fmt.Errorf("inventory not found for product %s", item.ProductID)
 		}
-		invModel := inv.(*query.InventoryReadModel)
+		invModel := inv.(*readmodel.InventoryReadModel)
 		if invModel.AvailableStock < item.Quantity {
 			return nil, fmt.Errorf("%w: product %s has only %d available, requested %d",
 				inventory.ErrInsufficientStock, item.ProductID, invModel.AvailableStock, item.Quantity)
@@ -158,11 +170,15 @@ func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order,
 // CancelOrder cancels an order
 func (h *Handler) CancelOrder(ctx context.Context, cmd CancelOrder) error {
 	// Get order from read store to release inventory
-	o, ok := h.readStore.Get("orders", cmd.OrderID)
+	o, ok, err := h.readStore.Get("orders", cmd.OrderID)
+	if err != nil {
+		log.Printf("[Command] Error getting order %s: %v", cmd.OrderID, err)
+		return order.ErrOrderNotFound
+	}
 	if !ok {
 		return order.ErrOrderNotFound
 	}
-	orderModel := o.(*query.OrderReadModel)
+	orderModel := o.(*readmodel.OrderReadModel)
 
 	// Release inventory (emits StockReleased events)
 	for _, item := range orderModel.Items {
