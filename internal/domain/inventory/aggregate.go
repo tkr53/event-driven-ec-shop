@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
+	"github.com/example/ec-event-driven/internal/domain/aggregate"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 )
 
@@ -25,6 +25,11 @@ type Inventory struct {
 	Version       int    `json:"version"`
 }
 
+// Aggregate interface implementation
+func (i *Inventory) GetID() string      { return i.ProductID }
+func (i *Inventory) GetVersion() int    { return i.Version }
+func (i *Inventory) SetVersion(v int)   { i.Version = v }
+
 func (i *Inventory) AvailableStock() int {
 	return i.TotalStock - i.ReservedStock
 }
@@ -37,8 +42,8 @@ func NewService(es store.EventStoreInterface) *Service {
 	return &Service{eventStore: es}
 }
 
-// applyEvent applies a single event to the inventory state
-func (i *Inventory) applyEvent(event store.Event) error {
+// ApplyEvent applies a single event to the inventory state (implements aggregate.Aggregate)
+func (i *Inventory) ApplyEvent(event store.Event) error {
 	switch event.EventType {
 	case EventStockAdded:
 		var data StockAdded
@@ -82,59 +87,15 @@ func (i *Inventory) applyEvent(event store.Event) error {
 
 // loadInventory loads inventory by replaying events, using snapshot if available
 func (s *Service) loadInventory(ctx context.Context, productID string) (*Inventory, error) {
-	inv := &Inventory{ProductID: productID}
-
-	// Try to load from snapshot first
-	snapshot, err := s.eventStore.GetSnapshot(ctx, productID)
+	inv, _, err := aggregate.LoadAggregate(ctx, s.eventStore, productID, func() *Inventory {
+		return &Inventory{ProductID: productID}
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get snapshot: %w", err)
+		return nil, err
 	}
-
-	var events []store.Event
-	if snapshot != nil {
-		// Restore state from snapshot
-		if err := json.Unmarshal(snapshot.State, inv); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
-		}
-		// Get only events after the snapshot
-		events = s.eventStore.GetEventsFromVersion(ctx, productID, snapshot.Version)
-	} else {
-		// No snapshot, get all events
-		events = s.eventStore.GetEvents(productID)
-	}
-
-	// Apply remaining events
-	for _, event := range events {
-		if err := inv.applyEvent(event); err != nil {
-			return nil, fmt.Errorf("failed to apply event: %w", err)
-		}
-	}
-
 	return inv, nil
 }
 
-// maybeCreateSnapshot creates a snapshot if the threshold is exceeded
-func (s *Service) maybeCreateSnapshot(ctx context.Context, inv *Inventory) error {
-	if inv.Version > 0 && inv.Version%store.SnapshotThreshold == 0 {
-		state, err := json.Marshal(inv)
-		if err != nil {
-			return fmt.Errorf("failed to marshal inventory state: %w", err)
-		}
-
-		snapshot := &store.Snapshot{
-			AggregateID:   inv.ProductID,
-			AggregateType: AggregateType,
-			Version:       inv.Version,
-			State:         state,
-			CreatedAt:     time.Now(),
-		}
-
-		if err := s.eventStore.SaveSnapshot(ctx, snapshot); err != nil {
-			return fmt.Errorf("failed to save snapshot: %w", err)
-		}
-	}
-	return nil
-}
 
 func (s *Service) AddStock(ctx context.Context, productID string, quantity int) error {
 	if quantity <= 0 {
@@ -165,7 +126,7 @@ func (s *Service) AddStock(ctx context.Context, productID string, quantity int) 
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, inv); err != nil {
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, inv, AggregateType); err != nil {
 		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
 	}
 
@@ -202,7 +163,7 @@ func (s *Service) Reserve(ctx context.Context, productID, orderID string, quanti
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, inv); err != nil {
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, inv, AggregateType); err != nil {
 		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
 	}
 
@@ -242,7 +203,7 @@ func (s *Service) Release(ctx context.Context, productID, orderID string, quanti
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, inv); err != nil {
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, inv, AggregateType); err != nil {
 		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
 	}
 
@@ -286,7 +247,7 @@ func (s *Service) Deduct(ctx context.Context, productID, orderID string, quantit
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, inv); err != nil {
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, inv, AggregateType); err != nil {
 		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
 	}
 

@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
+	"github.com/example/ec-event-driven/internal/domain/aggregate"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 )
 
@@ -31,6 +31,11 @@ type Cart struct {
 	Version int                 `json:"version"`
 }
 
+// Aggregate interface implementation
+func (c *Cart) GetID() string      { return c.ID }
+func (c *Cart) GetVersion() int    { return c.Version }
+func (c *Cart) SetVersion(v int)   { c.Version = v }
+
 type Service struct {
 	eventStore store.EventStoreInterface
 }
@@ -44,8 +49,8 @@ func GetCartID(userID string) string {
 	return "cart-" + userID
 }
 
-// applyEvent applies a single event to the cart state
-func (c *Cart) applyEvent(event store.Event) error {
+// ApplyEvent applies a single event to the cart state (implements aggregate.Aggregate)
+func (c *Cart) ApplyEvent(event store.Event) error {
 	switch event.EventType {
 	case EventItemAdded:
 		var data ItemAddedToCart
@@ -88,59 +93,19 @@ func (c *Cart) applyEvent(event store.Event) error {
 
 // loadCart loads a cart by replaying events, using snapshot if available
 func (s *Service) loadCart(ctx context.Context, cartID string) (*Cart, error) {
-	cart := &Cart{Items: make(map[string]CartItem)}
-
-	// Try to load from snapshot first
-	snapshot, err := s.eventStore.GetSnapshot(ctx, cartID)
+	cart, _, err := aggregate.LoadAggregate(ctx, s.eventStore, cartID, func() *Cart {
+		return &Cart{Items: make(map[string]CartItem)}
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get snapshot: %w", err)
+		return nil, err
 	}
-
-	var events []store.Event
-	if snapshot != nil {
-		// Restore state from snapshot
-		if err := json.Unmarshal(snapshot.State, cart); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
-		}
-		// Get only events after the snapshot
-		events = s.eventStore.GetEventsFromVersion(ctx, cartID, snapshot.Version)
-	} else {
-		// No snapshot, get all events
-		events = s.eventStore.GetEvents(cartID)
+	// Initialize Items map if nil (for empty carts)
+	if cart.Items == nil {
+		cart.Items = make(map[string]CartItem)
 	}
-
-	// Apply remaining events
-	for _, event := range events {
-		if err := cart.applyEvent(event); err != nil {
-			return nil, fmt.Errorf("failed to apply event: %w", err)
-		}
-	}
-
 	return cart, nil
 }
 
-// maybeCreateSnapshot creates a snapshot if the threshold is exceeded
-func (s *Service) maybeCreateSnapshot(ctx context.Context, cart *Cart) error {
-	if cart.Version > 0 && cart.Version%store.SnapshotThreshold == 0 {
-		state, err := json.Marshal(cart)
-		if err != nil {
-			return fmt.Errorf("failed to marshal cart state: %w", err)
-		}
-
-		snapshot := &store.Snapshot{
-			AggregateID:   cart.ID,
-			AggregateType: AggregateType,
-			Version:       cart.Version,
-			State:         state,
-			CreatedAt:     time.Now(),
-		}
-
-		if err := s.eventStore.SaveSnapshot(ctx, snapshot); err != nil {
-			return fmt.Errorf("failed to save snapshot: %w", err)
-		}
-	}
-	return nil
-}
 
 func (s *Service) AddItem(ctx context.Context, userID, productID string, quantity, price int) error {
 	if productID == "" {
@@ -183,7 +148,7 @@ func (s *Service) AddItem(ctx context.Context, userID, productID string, quantit
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, cart); err != nil {
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, cart, AggregateType); err != nil {
 		log.Printf("[Cart] Failed to create snapshot for cart %s: %v", cart.ID, err)
 	}
 
@@ -225,7 +190,7 @@ func (s *Service) RemoveItem(ctx context.Context, userID, productID string) erro
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, cart); err != nil {
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, cart, AggregateType); err != nil {
 		log.Printf("[Cart] Failed to create snapshot for cart %s: %v", cart.ID, err)
 	}
 
@@ -262,7 +227,7 @@ func (s *Service) Clear(ctx context.Context, userID string) error {
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, cart); err != nil {
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, cart, AggregateType); err != nil {
 		log.Printf("[Cart] Failed to create snapshot for cart %s: %v", cart.ID, err)
 	}
 
