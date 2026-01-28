@@ -2,11 +2,32 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/example/ec-event-driven/internal/auth"
 )
+
+// respondError writes a JSON error response
+func respondError(w http.ResponseWriter, message string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// ExtractToken extracts JWT token from cookie or Authorization header
+func ExtractToken(r *http.Request) string {
+	// Try cookie first (for browser)
+	if cookie, err := r.Cookie("access_token"); err == nil {
+		return cookie.Value
+	}
+	// Fall back to Authorization header (for API clients)
+	if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+		return strings.TrimPrefix(authHeader, "Bearer ")
+	}
+	return ""
+}
 
 type contextKey string
 
@@ -18,28 +39,15 @@ const (
 func AuthMiddleware(jwtService *auth.JWTService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var tokenString string
-
-			// Try cookie first (for browser)
-			cookie, err := r.Cookie("access_token")
-			if err == nil {
-				tokenString = cookie.Value
-			} else {
-				// Fall back to Authorization header (for API clients)
-				authHeader := r.Header.Get("Authorization")
-				if strings.HasPrefix(authHeader, "Bearer ") {
-					tokenString = strings.TrimPrefix(authHeader, "Bearer ")
-				}
-			}
-
+			tokenString := ExtractToken(r)
 			if tokenString == "" {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				respondError(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 
 			claims, err := jwtService.ValidateAccessToken(tokenString)
 			if err != nil {
-				http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+				respondError(w, "invalid token", http.StatusUnauthorized)
 				return
 			}
 
@@ -53,25 +61,12 @@ func AuthMiddleware(jwtService *auth.JWTService) func(http.Handler) http.Handler
 func OptionalAuthMiddleware(jwtService *auth.JWTService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var tokenString string
-
-			cookie, err := r.Cookie("access_token")
-			if err == nil {
-				tokenString = cookie.Value
-			} else {
-				authHeader := r.Header.Get("Authorization")
-				if strings.HasPrefix(authHeader, "Bearer ") {
-					tokenString = strings.TrimPrefix(authHeader, "Bearer ")
-				}
-			}
-
-			if tokenString != "" {
+			if tokenString := ExtractToken(r); tokenString != "" {
 				if claims, err := jwtService.ValidateAccessToken(tokenString); err == nil {
 					ctx := context.WithValue(r.Context(), UserContextKey, claims)
 					r = r.WithContext(ctx)
 				}
 			}
-
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -83,7 +78,7 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims, ok := r.Context().Value(UserContextKey).(*auth.Claims)
 			if !ok {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				respondError(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 
@@ -94,7 +89,7 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 				}
 			}
 
-			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			respondError(w, "forbidden", http.StatusForbidden)
 		})
 	}
 }

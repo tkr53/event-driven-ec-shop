@@ -33,6 +33,44 @@ var (
 	ErrOrderCancelled   = errors.New("order is already cancelled")
 )
 
+// validTransitions defines allowed state transitions
+var validTransitions = map[Status][]Status{
+	StatusPending:   {StatusPaid, StatusCancelled},
+	StatusPaid:      {StatusShipped, StatusCancelled},
+	StatusShipped:   {}, // terminal state
+	StatusCancelled: {}, // terminal state
+}
+
+// CanTransitionTo checks if the order can transition to the target status
+func (o *Order) CanTransitionTo(target Status) bool {
+	allowed, exists := validTransitions[o.Status]
+	if !exists {
+		return false
+	}
+	for _, s := range allowed {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
+
+// transitionError returns an appropriate error for an invalid transition
+func (o *Order) transitionError(target Status) error {
+	switch {
+	case o.Status == StatusCancelled:
+		return ErrOrderCancelled
+	case o.Status == StatusShipped && target == StatusCancelled:
+		return ErrOrderShipped
+	case (o.Status == StatusPaid || o.Status == StatusShipped) && target == StatusPaid:
+		return ErrOrderAlreadyPaid
+	case o.Status == StatusPending && target == StatusShipped:
+		return ErrOrderNotPaid
+	default:
+		return fmt.Errorf("%w: cannot transition from %s to %s", ErrInvalidStatus, o.Status, target)
+	}
+}
+
 type Order struct {
 	ID        string      `json:"id"`
 	UserID    string      `json:"user_id"`
@@ -227,18 +265,8 @@ func (s *Service) Pay(ctx context.Context, orderID string) error {
 		return err
 	}
 
-	// Validate current status
-	switch order.Status {
-	case StatusPending:
-		// Valid transition
-	case StatusPaid:
-		return ErrOrderAlreadyPaid
-	case StatusShipped:
-		return ErrOrderAlreadyPaid
-	case StatusCancelled:
-		return ErrOrderCancelled
-	default:
-		return fmt.Errorf("%w: cannot pay order in %s status", ErrInvalidStatus, order.Status)
+	if !order.CanTransitionTo(StatusPaid) {
+		return order.transitionError(StatusPaid)
 	}
 
 	event := OrderPaid{
@@ -271,18 +299,8 @@ func (s *Service) Ship(ctx context.Context, orderID string) error {
 		return err
 	}
 
-	// Validate current status - can only ship paid orders
-	switch order.Status {
-	case StatusPaid:
-		// Valid transition
-	case StatusPending:
-		return ErrOrderNotPaid
-	case StatusShipped:
-		return fmt.Errorf("%w: order is already shipped", ErrInvalidStatus)
-	case StatusCancelled:
-		return ErrOrderCancelled
-	default:
-		return fmt.Errorf("%w: cannot ship order in %s status", ErrInvalidStatus, order.Status)
+	if !order.CanTransitionTo(StatusShipped) {
+		return order.transitionError(StatusShipped)
 	}
 
 	event := OrderShipped{
@@ -315,16 +333,8 @@ func (s *Service) Cancel(ctx context.Context, orderID, reason string) error {
 		return err
 	}
 
-	// Validate current status - cannot cancel shipped orders
-	switch order.Status {
-	case StatusPending, StatusPaid:
-		// Valid - can cancel pending or paid orders (with refund if paid)
-	case StatusShipped:
-		return ErrOrderShipped
-	case StatusCancelled:
-		return ErrOrderCancelled
-	default:
-		return fmt.Errorf("%w: cannot cancel order in %s status", ErrInvalidStatus, order.Status)
+	if !order.CanTransitionTo(StatusCancelled) {
+		return order.transitionError(StatusCancelled)
 	}
 
 	event := OrderCancelled{

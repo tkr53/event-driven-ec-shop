@@ -28,13 +28,13 @@ func NewHandlers(cmdHandler *command.Handler, queryHandler *query.Handler) *Hand
 func (h *Handlers) CreateProduct(w http.ResponseWriter, r *http.Request) {
 	var cmd command.CreateProduct
 	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		respondJSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	product, err := h.cmdHandler.CreateProduct(r.Context(), cmd)
 	if err != nil {
-		http.Error(w, "Failed to create product", http.StatusInternalServerError)
+		respondJSONError(w, "Failed to create product", http.StatusInternalServerError)
 		return
 	}
 
@@ -50,7 +50,7 @@ func (h *Handlers) GetProduct(w http.ResponseWriter, r *http.Request) {
 	id := extractPathParam(r.URL.Path, "/products/")
 	product, ok := h.queryHandler.GetProduct(id)
 	if !ok {
-		http.Error(w, "Product not found", http.StatusNotFound)
+		respondJSONError(w, "Product not found", http.StatusNotFound)
 		return
 	}
 	respondJSON(w, http.StatusOK, product)
@@ -61,13 +61,13 @@ func (h *Handlers) UpdateProduct(w http.ResponseWriter, r *http.Request) {
 
 	var cmd command.UpdateProduct
 	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		respondJSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 	cmd.ProductID = id
 
 	if err := h.cmdHandler.UpdateProduct(r.Context(), cmd); err != nil {
-		http.Error(w, "Failed to update product", http.StatusInternalServerError)
+		respondJSONError(w, "Failed to update product", http.StatusInternalServerError)
 		return
 	}
 
@@ -79,7 +79,7 @@ func (h *Handlers) DeleteProduct(w http.ResponseWriter, r *http.Request) {
 
 	cmd := command.DeleteProduct{ProductID: id}
 	if err := h.cmdHandler.DeleteProduct(r.Context(), cmd); err != nil {
-		http.Error(w, "Failed to delete product", http.StatusInternalServerError)
+		respondJSONError(w, "Failed to delete product", http.StatusInternalServerError)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (h *Handlers) AddToCart(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.cmdHandler.AddToCart(r.Context(), cmd); err != nil {
 		log.Printf("[API] AddToCart error: %v", err)
-		http.Error(w, "Failed to add item to cart", http.StatusInternalServerError)
+		respondJSONError(w, "Failed to add item to cart", http.StatusInternalServerError)
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *Handlers) RemoveFromCart(w http.ResponseWriter, r *http.Request) {
 		ProductID: productID,
 	}
 	if err := h.cmdHandler.RemoveFromCart(r.Context(), cmd); err != nil {
-		http.Error(w, "Failed to remove item from cart", http.StatusInternalServerError)
+		respondJSONError(w, "Failed to remove item from cart", http.StatusInternalServerError)
 		return
 	}
 
@@ -157,7 +157,7 @@ func (h *Handlers) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 	cmd := command.PlaceOrder{UserID: userID}
 	order, err := h.cmdHandler.PlaceOrder(r.Context(), cmd)
 	if err != nil {
-		http.Error(w, "Failed to place order", http.StatusBadRequest)
+		respondJSONError(w, "Failed to place order", http.StatusBadRequest)
 		return
 	}
 
@@ -180,14 +180,14 @@ func (h *Handlers) GetOrder(w http.ResponseWriter, r *http.Request) {
 
 	order, ok := h.queryHandler.GetOrder(id)
 	if !ok {
-		http.Error(w, "Order not found", http.StatusNotFound)
+		respondJSONError(w, "Order not found", http.StatusNotFound)
 		return
 	}
 
 	// Authorization check: user can only access their own orders (admins can access all)
 	userID := getUserID(r)
 	if order.UserID != userID && !isAdmin(r) {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		respondJSONError(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -201,13 +201,13 @@ func (h *Handlers) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	// Authorization check: user can only cancel their own orders (admins can cancel all)
 	order, ok := h.queryHandler.GetOrder(id)
 	if !ok {
-		http.Error(w, "Order not found", http.StatusNotFound)
+		respondJSONError(w, "Order not found", http.StatusNotFound)
 		return
 	}
 
 	userID := getUserID(r)
 	if order.UserID != userID && !isAdmin(r) {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		respondJSONError(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -221,7 +221,7 @@ func (h *Handlers) CancelOrder(w http.ResponseWriter, r *http.Request) {
 		Reason:  req.Reason,
 	}
 	if err := h.cmdHandler.CancelOrder(r.Context(), cmd); err != nil {
-		http.Error(w, "Failed to cancel order", http.StatusInternalServerError)
+		respondJSONError(w, "Failed to cancel order", http.StatusInternalServerError)
 		return
 	}
 
@@ -267,7 +267,7 @@ func getUserID(r *http.Request) string {
 func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	userID := getUserID(r)
 	if userID == "" {
-		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		respondJSONError(w, "Authentication required", http.StatusUnauthorized)
 		return "", false
 	}
 	return userID, true
