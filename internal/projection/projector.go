@@ -75,7 +75,11 @@ func (p *Projector) handleProductEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("products", e.ProductID, func(current any) any {
-			prod := current.(*readmodel.ProductReadModel)
+			prod, ok := current.(*readmodel.ProductReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for ProductReadModel (id: %s)", e.ProductID)
+				return current
+			}
 			prod.Name = e.Name
 			prod.Description = e.Description
 			prod.Price = e.Price
@@ -115,7 +119,11 @@ func (p *Projector) handleProductEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("products", e.ProductID, func(current any) any {
-			prod := current.(*readmodel.ProductReadModel)
+			prod, ok := current.(*readmodel.ProductReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for ProductReadModel (id: %s)", e.ProductID)
+				return current
+			}
 			prod.ImageURL = e.ImageURL
 			prod.UpdatedAt = e.UpdatedAt
 			return prod
@@ -136,7 +144,9 @@ func (p *Projector) handleCartEvent(event store.Event) error {
 		// Get product name
 		productName := ""
 		if prod, ok := p.readStore.Get("products", e.ProductID); ok {
-			productName = prod.(*readmodel.ProductReadModel).Name
+			if p, ok := prod.(*readmodel.ProductReadModel); ok {
+				productName = p.Name
+			}
 		}
 
 		_, ok := p.readStore.Get("carts", e.CartID)
@@ -153,7 +163,11 @@ func (p *Projector) handleCartEvent(event store.Event) error {
 		} else {
 			// Update existing cart
 			p.readStore.Update("carts", e.CartID, func(current any) any {
-				c := current.(*readmodel.CartReadModel)
+				c, ok := current.(*readmodel.CartReadModel)
+				if !ok {
+					log.Printf("[Projector] Type assertion failed for CartReadModel (id: %s)", e.CartID)
+					return current
+				}
 				// Check if item already exists
 				found := false
 				for i, item := range c.Items {
@@ -182,7 +196,11 @@ func (p *Projector) handleCartEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("carts", e.CartID, func(current any) any {
-			c := current.(*readmodel.CartReadModel)
+			c, ok := current.(*readmodel.CartReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for CartReadModel (id: %s)", e.CartID)
+				return current
+			}
 			newItems := make([]readmodel.CartItemReadModel, 0)
 			for _, item := range c.Items {
 				if item.ProductID != e.ProductID {
@@ -241,7 +259,11 @@ func (p *Projector) handleOrderEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("orders", e.OrderID, func(current any) any {
-			o := current.(*readmodel.OrderReadModel)
+			o, ok := current.(*readmodel.OrderReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for OrderReadModel (id: %s)", e.OrderID)
+				return current
+			}
 			o.Status = "paid"
 			o.UpdatedAt = e.PaidAt
 			return o
@@ -253,7 +275,11 @@ func (p *Projector) handleOrderEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("orders", e.OrderID, func(current any) any {
-			o := current.(*readmodel.OrderReadModel)
+			o, ok := current.(*readmodel.OrderReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for OrderReadModel (id: %s)", e.OrderID)
+				return current
+			}
 			o.Status = "shipped"
 			o.UpdatedAt = e.ShippedAt
 			return o
@@ -265,7 +291,11 @@ func (p *Projector) handleOrderEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("orders", e.OrderID, func(current any) any {
-			o := current.(*readmodel.OrderReadModel)
+			o, ok := current.(*readmodel.OrderReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for OrderReadModel (id: %s)", e.OrderID)
+				return current
+			}
 			o.Status = "cancelled"
 			o.UpdatedAt = e.CancelledAt
 			return o
@@ -291,7 +321,11 @@ func (p *Projector) handleInventoryEvent(event store.Event) error {
 				AvailableStock: e.Quantity,
 			})
 		} else {
-			inv := existing.(*readmodel.InventoryReadModel)
+			inv, ok := existing.(*readmodel.InventoryReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for InventoryReadModel (productId: %s)", e.ProductID)
+				return nil
+			}
 			inv.TotalStock += e.Quantity
 			inv.AvailableStock = inv.TotalStock - inv.ReservedStock
 			p.readStore.Set("inventory", e.ProductID, inv)
@@ -299,7 +333,11 @@ func (p *Projector) handleInventoryEvent(event store.Event) error {
 
 		// Also update product stock
 		p.readStore.Update("products", e.ProductID, func(current any) any {
-			prod := current.(*readmodel.ProductReadModel)
+			prod, ok := current.(*readmodel.ProductReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for ProductReadModel (id: %s)", e.ProductID)
+				return current
+			}
 			prod.Stock += e.Quantity
 			prod.UpdatedAt = time.Now()
 			return prod
@@ -311,13 +349,21 @@ func (p *Projector) handleInventoryEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("inventory", e.ProductID, func(current any) any {
-			inv := current.(*readmodel.InventoryReadModel)
+			inv, ok := current.(*readmodel.InventoryReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for InventoryReadModel (productId: %s)", e.ProductID)
+				return current
+			}
 			inv.ReservedStock += e.Quantity
 			inv.AvailableStock = inv.TotalStock - inv.ReservedStock
 			return inv
 		})
 		p.readStore.Update("products", e.ProductID, func(current any) any {
-			prod := current.(*readmodel.ProductReadModel)
+			prod, ok := current.(*readmodel.ProductReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for ProductReadModel (id: %s)", e.ProductID)
+				return current
+			}
 			prod.Stock -= e.Quantity
 			prod.UpdatedAt = time.Now()
 			return prod
@@ -329,13 +375,21 @@ func (p *Projector) handleInventoryEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("inventory", e.ProductID, func(current any) any {
-			inv := current.(*readmodel.InventoryReadModel)
+			inv, ok := current.(*readmodel.InventoryReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for InventoryReadModel (productId: %s)", e.ProductID)
+				return current
+			}
 			inv.ReservedStock -= e.Quantity
 			inv.AvailableStock = inv.TotalStock - inv.ReservedStock
 			return inv
 		})
 		p.readStore.Update("products", e.ProductID, func(current any) any {
-			prod := current.(*readmodel.ProductReadModel)
+			prod, ok := current.(*readmodel.ProductReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for ProductReadModel (id: %s)", e.ProductID)
+				return current
+			}
 			prod.Stock += e.Quantity
 			prod.UpdatedAt = time.Now()
 			return prod
@@ -347,7 +401,11 @@ func (p *Projector) handleInventoryEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("inventory", e.ProductID, func(current any) any {
-			inv := current.(*readmodel.InventoryReadModel)
+			inv, ok := current.(*readmodel.InventoryReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for InventoryReadModel (productId: %s)", e.ProductID)
+				return current
+			}
 			inv.TotalStock -= e.Quantity
 			inv.ReservedStock -= e.Quantity
 			inv.AvailableStock = inv.TotalStock - inv.ReservedStock
@@ -390,7 +448,11 @@ func (p *Projector) handleUserEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("users", e.UserID, func(current any) any {
-			u := current.(*readmodel.UserReadModel)
+			u, ok := current.(*readmodel.UserReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for UserReadModel (id: %s)", e.UserID)
+				return current
+			}
 			u.Name = e.Name
 			u.UpdatedAt = e.UpdatedAt
 			return u
@@ -402,7 +464,11 @@ func (p *Projector) handleUserEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("users", e.UserID, func(current any) any {
-			u := current.(*readmodel.UserReadModel)
+			u, ok := current.(*readmodel.UserReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for UserReadModel (id: %s)", e.UserID)
+				return current
+			}
 			u.PasswordHash = e.PasswordHash
 			u.UpdatedAt = e.ChangedAt
 			return u
@@ -414,7 +480,11 @@ func (p *Projector) handleUserEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("users", e.UserID, func(current any) any {
-			u := current.(*readmodel.UserReadModel)
+			u, ok := current.(*readmodel.UserReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for UserReadModel (id: %s)", e.UserID)
+				return current
+			}
 			u.IsActive = false
 			u.UpdatedAt = e.DeactivatedAt
 			return u
@@ -426,7 +496,11 @@ func (p *Projector) handleUserEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("users", e.UserID, func(current any) any {
-			u := current.(*readmodel.UserReadModel)
+			u, ok := current.(*readmodel.UserReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for UserReadModel (id: %s)", e.UserID)
+				return current
+			}
 			u.IsActive = true
 			u.UpdatedAt = e.ActivatedAt
 			return u
@@ -461,7 +535,11 @@ func (p *Projector) handleCategoryEvent(event store.Event) error {
 			return err
 		}
 		p.readStore.Update("categories", e.CategoryID, func(current any) any {
-			c := current.(*readmodel.CategoryReadModel)
+			c, ok := current.(*readmodel.CategoryReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for CategoryReadModel (id: %s)", e.CategoryID)
+				return current
+			}
 			c.Name = e.Name
 			c.Slug = e.Slug
 			c.Description = e.Description
@@ -478,7 +556,11 @@ func (p *Projector) handleCategoryEvent(event store.Event) error {
 		}
 		// Soft delete by marking as inactive
 		p.readStore.Update("categories", e.CategoryID, func(current any) any {
-			c := current.(*readmodel.CategoryReadModel)
+			c, ok := current.(*readmodel.CategoryReadModel)
+			if !ok {
+				log.Printf("[Projector] Type assertion failed for CategoryReadModel (id: %s)", e.CategoryID)
+				return current
+			}
 			c.IsActive = false
 			c.UpdatedAt = e.DeletedAt
 			return c
