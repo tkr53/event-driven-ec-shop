@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,7 +48,12 @@ type CategoryResponse struct {
 
 // ListCategories returns all categories
 func (h *CategoryHandlers) ListCategories(w http.ResponseWriter, r *http.Request) {
-	allCategories := h.readStore.GetAll("categories")
+	allCategories, err := h.readStore.GetAll("categories")
+	if err != nil {
+		log.Printf("[API] Error getting categories: %v", err)
+		respondJSONError(w, "Failed to fetch categories", http.StatusInternalServerError)
+		return
+	}
 
 	// Build a tree structure
 	categoryMap := make(map[string]*CategoryResponse)
