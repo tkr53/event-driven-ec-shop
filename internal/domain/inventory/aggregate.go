@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
@@ -165,7 +166,7 @@ func (s *Service) AddStock(ctx context.Context, productID string, quantity int) 
 
 	// Check if we need to create a snapshot
 	if err := s.maybeCreateSnapshot(ctx, inv); err != nil {
-		_ = err
+		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
 	}
 
 	return nil
@@ -202,7 +203,7 @@ func (s *Service) Reserve(ctx context.Context, productID, orderID string, quanti
 
 	// Check if we need to create a snapshot
 	if err := s.maybeCreateSnapshot(ctx, inv); err != nil {
-		_ = err
+		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
 	}
 
 	return nil
@@ -242,7 +243,7 @@ func (s *Service) Release(ctx context.Context, productID, orderID string, quanti
 
 	// Check if we need to create a snapshot
 	if err := s.maybeCreateSnapshot(ctx, inv); err != nil {
-		_ = err
+		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
 	}
 
 	return nil
@@ -286,7 +287,7 @@ func (s *Service) Deduct(ctx context.Context, productID, orderID string, quantit
 
 	// Check if we need to create a snapshot
 	if err := s.maybeCreateSnapshot(ctx, inv); err != nil {
-		_ = err
+		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
 	}
 
 	return nil

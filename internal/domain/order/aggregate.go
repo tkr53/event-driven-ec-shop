@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
@@ -214,8 +215,7 @@ func (s *Service) Place(ctx context.Context, userID string, items []OrderItem) (
 
 	// Check if we need to create a snapshot
 	if err := s.maybeCreateSnapshot(ctx, order); err != nil {
-		// Log but don't fail the operation
-		_ = err
+		log.Printf("[Order] Failed to create snapshot for order %s: %v", order.ID, err)
 	}
 
 	return order, nil

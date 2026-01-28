@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
@@ -183,7 +184,7 @@ func (s *Service) AddItem(ctx context.Context, userID, productID string, quantit
 
 	// Check if we need to create a snapshot
 	if err := s.maybeCreateSnapshot(ctx, cart); err != nil {
-		_ = err
+		log.Printf("[Cart] Failed to create snapshot for cart %s: %v", cart.ID, err)
 	}
 
 	return nil
@@ -225,7 +226,7 @@ func (s *Service) RemoveItem(ctx context.Context, userID, productID string) erro
 
 	// Check if we need to create a snapshot
 	if err := s.maybeCreateSnapshot(ctx, cart); err != nil {
-		_ = err
+		log.Printf("[Cart] Failed to create snapshot for cart %s: %v", cart.ID, err)
 	}
 
 	return nil
@@ -262,7 +263,7 @@ func (s *Service) Clear(ctx context.Context, userID string) error {
 
 	// Check if we need to create a snapshot
 	if err := s.maybeCreateSnapshot(ctx, cart); err != nil {
-		_ = err
+		log.Printf("[Cart] Failed to create snapshot for cart %s: %v", cart.ID, err)
 	}
 
 	return nil

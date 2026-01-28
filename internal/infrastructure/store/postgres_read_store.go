@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/readmodel"
@@ -14,7 +13,6 @@ import (
 // PostgresReadStore implements ReadStoreInterface using PostgreSQL
 type PostgresReadStore struct {
 	db *sql.DB
-	mu sync.RWMutex // for thread-safe operations
 }
 
 // NewPostgresReadStore creates a new PostgreSQL-based read store
@@ -24,9 +22,6 @@ func NewPostgresReadStore(db *sql.DB) *PostgresReadStore {
 
 // Set stores a read model
 func (rs *PostgresReadStore) Set(collection, id string, data any) {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-
 	switch collection {
 	case "products":
 		rs.setProduct(id, data.(*readmodel.ProductReadModel))
@@ -47,9 +42,6 @@ func (rs *PostgresReadStore) Set(collection, id string, data any) {
 
 // Get retrieves a read model by id
 func (rs *PostgresReadStore) Get(collection, id string) (any, bool) {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-
 	switch collection {
 	case "products":
 		return rs.getProduct(id)
@@ -71,9 +63,6 @@ func (rs *PostgresReadStore) Get(collection, id string) (any, bool) {
 
 // GetAll retrieves all items in a collection
 func (rs *PostgresReadStore) GetAll(collection string) []any {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-
 	switch collection {
 	case "products":
 		return rs.getAllProducts()
@@ -95,9 +84,6 @@ func (rs *PostgresReadStore) GetAll(collection string) []any {
 
 // Delete removes a read model
 func (rs *PostgresReadStore) Delete(collection, id string) {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-
 	var tableName string
 	switch collection {
 	case "products":
@@ -126,9 +112,6 @@ func (rs *PostgresReadStore) Delete(collection, id string) {
 
 // Update modifies a read model using an update function
 func (rs *PostgresReadStore) Update(collection, id string, updateFn func(current any) any) bool {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-
 	// Get current value
 	var current any
 	var found bool
@@ -474,9 +457,6 @@ func (rs *PostgresReadStore) getUserUnsafe(id string) (*readmodel.UserReadModel,
 
 // GetUserByEmail retrieves a user by email
 func (rs *PostgresReadStore) GetUserByEmail(email string) (*readmodel.UserReadModel, bool) {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-
 	var u readmodel.UserReadModel
 	err := rs.db.QueryRow(`
 		SELECT id, email, password_hash, name, role, is_active, created_at, updated_at
@@ -553,9 +533,6 @@ func (rs *PostgresReadStore) getSessionUnsafe(id string) (*readmodel.SessionRead
 
 // GetSessionByUserID retrieves a session by user ID
 func (rs *PostgresReadStore) GetSessionByUserID(userID string) (*readmodel.SessionReadModel, bool) {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-
 	var s readmodel.SessionReadModel
 	err := rs.db.QueryRow(`
 		SELECT id, user_id, refresh_token_hash, expires_at, created_at, ip_address, user_agent
@@ -573,9 +550,6 @@ func (rs *PostgresReadStore) GetSessionByUserID(userID string) (*readmodel.Sessi
 
 // DeleteSessionsByUserID deletes all sessions for a user
 func (rs *PostgresReadStore) DeleteSessionsByUserID(userID string) {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-
 	_, err := rs.db.Exec(`DELETE FROM user_sessions WHERE user_id = $1`, userID)
 	if err != nil {
 		log.Printf("[PostgresReadStore] Error deleting sessions: %v", err)
@@ -584,9 +558,6 @@ func (rs *PostgresReadStore) DeleteSessionsByUserID(userID string) {
 
 // DeleteExpiredSessions removes expired sessions
 func (rs *PostgresReadStore) DeleteExpiredSessions() {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-
 	_, err := rs.db.Exec(`DELETE FROM user_sessions WHERE expires_at < NOW()`)
 	if err != nil {
 		log.Printf("[PostgresReadStore] Error deleting expired sessions: %v", err)
@@ -662,9 +633,6 @@ func (rs *PostgresReadStore) getCategoryUnsafe(id string) (*readmodel.CategoryRe
 
 // GetCategoryBySlug retrieves a category by its slug
 func (rs *PostgresReadStore) GetCategoryBySlug(slug string) (*readmodel.CategoryReadModel, bool) {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-
 	var c readmodel.CategoryReadModel
 	var parentID sql.NullString
 	err := rs.db.QueryRow(`
@@ -710,9 +678,6 @@ func (rs *PostgresReadStore) getAllCategories() []any {
 
 // AddProductCategory adds a category to a product
 func (rs *PostgresReadStore) AddProductCategory(productID, categoryID string) {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-
 	_, err := rs.db.Exec(`
 		INSERT INTO product_categories (product_id, category_id)
 		VALUES ($1, $2)
@@ -725,9 +690,6 @@ func (rs *PostgresReadStore) AddProductCategory(productID, categoryID string) {
 
 // RemoveProductCategory removes a category from a product
 func (rs *PostgresReadStore) RemoveProductCategory(productID, categoryID string) {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-
 	_, err := rs.db.Exec(`DELETE FROM product_categories WHERE product_id = $1 AND category_id = $2`, productID, categoryID)
 	if err != nil {
 		log.Printf("[PostgresReadStore] Error removing product category: %v", err)
@@ -736,9 +698,6 @@ func (rs *PostgresReadStore) RemoveProductCategory(productID, categoryID string)
 
 // GetProductCategories returns all category IDs for a product
 func (rs *PostgresReadStore) GetProductCategories(productID string) []string {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-
 	rows, err := rs.db.Query(`SELECT category_id FROM product_categories WHERE product_id = $1`, productID)
 	if err != nil {
 		log.Printf("[PostgresReadStore] Error getting product categories: %v", err)
@@ -771,9 +730,6 @@ type SearchProductsParams struct {
 
 // SearchProducts searches for products with various filters
 func (rs *PostgresReadStore) SearchProducts(params SearchProductsParams) []*readmodel.ProductReadModel {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-
 	query := `
 		SELECT DISTINCT p.id, p.name, p.description, p.price, p.stock, p.image_url, p.created_at, p.updated_at
 		FROM read_products p
@@ -831,11 +787,16 @@ func (rs *PostgresReadStore) SearchProducts(params SearchProductsParams) []*read
 
 	// Pagination
 	if params.Limit > 0 {
-		query += " LIMIT " + string(rune('0'+params.Limit))
+		query += fmt.Sprintf(" LIMIT $%d", argNum)
+		args = append(args, params.Limit)
+		argNum++
 	}
 	if params.Offset > 0 {
-		query += " OFFSET " + string(rune('0'+params.Offset))
+		query += fmt.Sprintf(" OFFSET $%d", argNum)
+		args = append(args, params.Offset)
+		argNum++
 	}
+	_ = argNum // suppress unused variable warning
 
 	rows, err := rs.db.Query(query, args...)
 	if err != nil {
