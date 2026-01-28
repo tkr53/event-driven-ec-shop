@@ -118,19 +118,19 @@ func (rs *PostgresReadStore) Update(collection, id string, updateFn func(current
 
 	switch collection {
 	case "products":
-		current, found = rs.getProductUnsafe(id)
+		current, found = rs.getProduct(id)
 	case "carts":
-		current, found = rs.getCartUnsafe(id)
+		current, found = rs.getCart(id)
 	case "orders":
-		current, found = rs.getOrderUnsafe(id)
+		current, found = rs.getOrder(id)
 	case "inventory":
-		current, found = rs.getInventoryUnsafe(id)
+		current, found = rs.getInventory(id)
 	case "users":
-		current, found = rs.getUserUnsafe(id)
+		current, found = rs.getUser(id)
 	case "sessions":
-		current, found = rs.getSessionUnsafe(id)
+		current, found = rs.getSession(id)
 	case "categories":
-		current, found = rs.getCategoryUnsafe(id)
+		current, found = rs.getCategory(id)
 	}
 
 	if !found {
@@ -143,19 +143,19 @@ func (rs *PostgresReadStore) Update(collection, id string, updateFn func(current
 	// Save updated value
 	switch collection {
 	case "products":
-		rs.setProductUnsafe(id, updated.(*readmodel.ProductReadModel))
+		rs.setProduct(id, updated.(*readmodel.ProductReadModel))
 	case "carts":
-		rs.setCartUnsafe(id, updated.(*readmodel.CartReadModel))
+		rs.setCart(id, updated.(*readmodel.CartReadModel))
 	case "orders":
-		rs.setOrderUnsafe(id, updated.(*readmodel.OrderReadModel))
+		rs.setOrder(id, updated.(*readmodel.OrderReadModel))
 	case "inventory":
-		rs.setInventoryUnsafe(id, updated.(*readmodel.InventoryReadModel))
+		rs.setInventory(id, updated.(*readmodel.InventoryReadModel))
 	case "users":
-		rs.setUserUnsafe(id, updated.(*readmodel.UserReadModel))
+		rs.setUser(id, updated.(*readmodel.UserReadModel))
 	case "sessions":
-		rs.setSessionUnsafe(id, updated.(*readmodel.SessionReadModel))
+		rs.setSession(id, updated.(*readmodel.SessionReadModel))
 	case "categories":
-		rs.setCategoryUnsafe(id, updated.(*readmodel.CategoryReadModel))
+		rs.setCategory(id, updated.(*readmodel.CategoryReadModel))
 	}
 
 	return true
@@ -163,10 +163,6 @@ func (rs *PostgresReadStore) Update(collection, id string, updateFn func(current
 
 // Product operations
 func (rs *PostgresReadStore) setProduct(id string, p *readmodel.ProductReadModel) {
-	rs.setProductUnsafe(id, p)
-}
-
-func (rs *PostgresReadStore) setProductUnsafe(id string, p *readmodel.ProductReadModel) {
 	_, err := rs.db.Exec(`
 		INSERT INTO read_products (id, name, description, price, stock, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -182,11 +178,7 @@ func (rs *PostgresReadStore) setProductUnsafe(id string, p *readmodel.ProductRea
 	}
 }
 
-func (rs *PostgresReadStore) getProduct(id string) (any, bool) {
-	return rs.getProductUnsafe(id)
-}
-
-func (rs *PostgresReadStore) getProductUnsafe(id string) (*readmodel.ProductReadModel, bool) {
+func (rs *PostgresReadStore) getProduct(id string) (*readmodel.ProductReadModel, bool) {
 	var p readmodel.ProductReadModel
 	err := rs.db.QueryRow(`
 		SELECT id, name, description, price, stock, created_at, updated_at
@@ -226,10 +218,6 @@ func (rs *PostgresReadStore) getAllProducts() []any {
 
 // Cart operations
 func (rs *PostgresReadStore) setCart(id string, c *readmodel.CartReadModel) {
-	rs.setCartUnsafe(id, c)
-}
-
-func (rs *PostgresReadStore) setCartUnsafe(id string, c *readmodel.CartReadModel) {
 	itemsJSON, _ := json.Marshal(c.Items)
 	_, err := rs.db.Exec(`
 		INSERT INTO read_carts (id, user_id, items, total, updated_at)
@@ -244,11 +232,7 @@ func (rs *PostgresReadStore) setCartUnsafe(id string, c *readmodel.CartReadModel
 	}
 }
 
-func (rs *PostgresReadStore) getCart(id string) (any, bool) {
-	return rs.getCartUnsafe(id)
-}
-
-func (rs *PostgresReadStore) getCartUnsafe(id string) (*readmodel.CartReadModel, bool) {
+func (rs *PostgresReadStore) getCart(id string) (*readmodel.CartReadModel, bool) {
 	var c readmodel.CartReadModel
 	var itemsJSON []byte
 	err := rs.db.QueryRow(`
@@ -288,10 +272,6 @@ func (rs *PostgresReadStore) getAllCarts() []any {
 
 // Order operations
 func (rs *PostgresReadStore) setOrder(id string, o *readmodel.OrderReadModel) {
-	rs.setOrderUnsafe(id, o)
-}
-
-func (rs *PostgresReadStore) setOrderUnsafe(id string, o *readmodel.OrderReadModel) {
 	itemsJSON, _ := json.Marshal(o.Items)
 	_, err := rs.db.Exec(`
 		INSERT INTO read_orders (id, user_id, items, total, status, created_at, updated_at)
@@ -307,11 +287,7 @@ func (rs *PostgresReadStore) setOrderUnsafe(id string, o *readmodel.OrderReadMod
 	}
 }
 
-func (rs *PostgresReadStore) getOrder(id string) (any, bool) {
-	return rs.getOrderUnsafe(id)
-}
-
-func (rs *PostgresReadStore) getOrderUnsafe(id string) (*readmodel.OrderReadModel, bool) {
+func (rs *PostgresReadStore) getOrder(id string) (*readmodel.OrderReadModel, bool) {
 	var o readmodel.OrderReadModel
 	var itemsJSON []byte
 	err := rs.db.QueryRow(`
@@ -355,10 +331,6 @@ func (rs *PostgresReadStore) getAllOrders() []any {
 
 // Inventory operations
 func (rs *PostgresReadStore) setInventory(id string, inv *readmodel.InventoryReadModel) {
-	rs.setInventoryUnsafe(id, inv)
-}
-
-func (rs *PostgresReadStore) setInventoryUnsafe(id string, inv *readmodel.InventoryReadModel) {
 	_, err := rs.db.Exec(`
 		INSERT INTO read_inventory (product_id, total_stock, reserved_stock, available_stock, updated_at)
 		VALUES ($1, $2, $3, $4, $5)
@@ -373,11 +345,7 @@ func (rs *PostgresReadStore) setInventoryUnsafe(id string, inv *readmodel.Invent
 	}
 }
 
-func (rs *PostgresReadStore) getInventory(id string) (any, bool) {
-	return rs.getInventoryUnsafe(id)
-}
-
-func (rs *PostgresReadStore) getInventoryUnsafe(id string) (*readmodel.InventoryReadModel, bool) {
+func (rs *PostgresReadStore) getInventory(id string) (*readmodel.InventoryReadModel, bool) {
 	var inv readmodel.InventoryReadModel
 	err := rs.db.QueryRow(`
 		SELECT product_id, total_stock, reserved_stock, available_stock
@@ -416,10 +384,6 @@ func (rs *PostgresReadStore) getAllInventory() []any {
 
 // User operations
 func (rs *PostgresReadStore) setUser(id string, u *readmodel.UserReadModel) {
-	rs.setUserUnsafe(id, u)
-}
-
-func (rs *PostgresReadStore) setUserUnsafe(id string, u *readmodel.UserReadModel) {
 	_, err := rs.db.Exec(`
 		INSERT INTO read_users (id, email, password_hash, name, role, is_active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -436,11 +400,7 @@ func (rs *PostgresReadStore) setUserUnsafe(id string, u *readmodel.UserReadModel
 	}
 }
 
-func (rs *PostgresReadStore) getUser(id string) (any, bool) {
-	return rs.getUserUnsafe(id)
-}
-
-func (rs *PostgresReadStore) getUserUnsafe(id string) (*readmodel.UserReadModel, bool) {
+func (rs *PostgresReadStore) getUser(id string) (*readmodel.UserReadModel, bool) {
 	var u readmodel.UserReadModel
 	err := rs.db.QueryRow(`
 		SELECT id, email, password_hash, name, role, is_active, created_at, updated_at
@@ -496,10 +456,6 @@ func (rs *PostgresReadStore) getAllUsers() []any {
 
 // Session operations
 func (rs *PostgresReadStore) setSession(id string, s *readmodel.SessionReadModel) {
-	rs.setSessionUnsafe(id, s)
-}
-
-func (rs *PostgresReadStore) setSessionUnsafe(id string, s *readmodel.SessionReadModel) {
 	_, err := rs.db.Exec(`
 		INSERT INTO user_sessions (id, user_id, refresh_token_hash, expires_at, created_at, ip_address, user_agent)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -512,11 +468,7 @@ func (rs *PostgresReadStore) setSessionUnsafe(id string, s *readmodel.SessionRea
 	}
 }
 
-func (rs *PostgresReadStore) getSession(id string) (any, bool) {
-	return rs.getSessionUnsafe(id)
-}
-
-func (rs *PostgresReadStore) getSessionUnsafe(id string) (*readmodel.SessionReadModel, bool) {
+func (rs *PostgresReadStore) getSession(id string) (*readmodel.SessionReadModel, bool) {
 	var s readmodel.SessionReadModel
 	err := rs.db.QueryRow(`
 		SELECT id, user_id, refresh_token_hash, expires_at, created_at, ip_address, user_agent
@@ -589,10 +541,6 @@ func (rs *PostgresReadStore) getAllSessions() []any {
 
 // Category operations
 func (rs *PostgresReadStore) setCategory(id string, c *readmodel.CategoryReadModel) {
-	rs.setCategoryUnsafe(id, c)
-}
-
-func (rs *PostgresReadStore) setCategoryUnsafe(id string, c *readmodel.CategoryReadModel) {
 	_, err := rs.db.Exec(`
 		INSERT INTO read_categories (id, name, slug, description, parent_id, sort_order, is_active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -610,11 +558,7 @@ func (rs *PostgresReadStore) setCategoryUnsafe(id string, c *readmodel.CategoryR
 	}
 }
 
-func (rs *PostgresReadStore) getCategory(id string) (any, bool) {
-	return rs.getCategoryUnsafe(id)
-}
-
-func (rs *PostgresReadStore) getCategoryUnsafe(id string) (*readmodel.CategoryReadModel, bool) {
+func (rs *PostgresReadStore) getCategory(id string) (*readmodel.CategoryReadModel, bool) {
 	var c readmodel.CategoryReadModel
 	var parentID sql.NullString
 	err := rs.db.QueryRow(`
