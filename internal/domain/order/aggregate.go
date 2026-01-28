@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/example/ec-event-driven/internal/domain/aggregate"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/google/uuid"
 )
@@ -82,6 +83,11 @@ type Order struct {
 	Version   int         `json:"version"` // Current event version
 }
 
+// Aggregate interface implementation
+func (o *Order) GetID() string      { return o.ID }
+func (o *Order) GetVersion() int    { return o.Version }
+func (o *Order) SetVersion(v int)   { o.Version = v }
+
 type Service struct {
 	eventStore store.EventStoreInterface
 }
@@ -108,8 +114,8 @@ func (s *Service) rebuildStatus(events []store.Event) Status {
 	return status
 }
 
-// applyEvent applies a single event to the order state
-func (o *Order) applyEvent(event store.Event) error {
+// ApplyEvent applies a single event to the order state (implements aggregate.Aggregate)
+func (o *Order) ApplyEvent(event store.Event) error {
 	switch event.EventType {
 	case EventOrderPlaced:
 		var data OrderPlaced
@@ -151,63 +157,18 @@ func (o *Order) applyEvent(event store.Event) error {
 
 // loadOrder loads an order by replaying events, using snapshot if available
 func (s *Service) loadOrder(ctx context.Context, orderID string) (*Order, error) {
-	order := &Order{}
-
-	// Try to load from snapshot first
-	snapshot, err := s.eventStore.GetSnapshot(ctx, orderID)
+	order, found, err := aggregate.LoadAggregate(ctx, s.eventStore, orderID, func() *Order {
+		return &Order{}
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get snapshot: %w", err)
+		return nil, err
 	}
-
-	var events []store.Event
-	if snapshot != nil {
-		// Restore state from snapshot
-		if err := json.Unmarshal(snapshot.State, order); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
-		}
-		// Get only events after the snapshot
-		events = s.eventStore.GetEventsFromVersion(ctx, orderID, snapshot.Version)
-	} else {
-		// No snapshot, get all events
-		events = s.eventStore.GetEvents(orderID)
-	}
-
-	if snapshot == nil && len(events) == 0 {
+	if !found {
 		return nil, ErrOrderNotFound
 	}
-
-	// Apply remaining events
-	for _, event := range events {
-		if err := order.applyEvent(event); err != nil {
-			return nil, fmt.Errorf("failed to apply event: %w", err)
-		}
-	}
-
 	return order, nil
 }
 
-// maybeCreateSnapshot creates a snapshot if the threshold is exceeded
-func (s *Service) maybeCreateSnapshot(ctx context.Context, order *Order) error {
-	if order.Version > 0 && order.Version%store.SnapshotThreshold == 0 {
-		state, err := json.Marshal(order)
-		if err != nil {
-			return fmt.Errorf("failed to marshal order state: %w", err)
-		}
-
-		snapshot := &store.Snapshot{
-			AggregateID:   order.ID,
-			AggregateType: AggregateType,
-			Version:       order.Version,
-			State:         state,
-			CreatedAt:     time.Now(),
-		}
-
-		if err := s.eventStore.SaveSnapshot(ctx, snapshot); err != nil {
-			return fmt.Errorf("failed to save snapshot: %w", err)
-		}
-	}
-	return nil
-}
 
 func (s *Service) Place(ctx context.Context, userID string, items []OrderItem) (*Order, error) {
 	if len(items) == 0 {
@@ -252,7 +213,7 @@ func (s *Service) Place(ctx context.Context, userID string, items []OrderItem) (
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, order); err != nil {
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, order, AggregateType); err != nil {
 		log.Printf("[Order] Failed to create snapshot for order %s: %v", order.ID, err)
 	}
 
@@ -286,8 +247,8 @@ func (s *Service) Pay(ctx context.Context, orderID string) error {
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, order); err != nil {
-		_ = err
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, order, AggregateType); err != nil {
+		log.Printf("[Order] Failed to create snapshot for order %s: %v", order.ID, err)
 	}
 
 	return nil
@@ -320,8 +281,8 @@ func (s *Service) Ship(ctx context.Context, orderID string) error {
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, order); err != nil {
-		_ = err
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, order, AggregateType); err != nil {
+		log.Printf("[Order] Failed to create snapshot for order %s: %v", order.ID, err)
 	}
 
 	return nil
@@ -355,8 +316,8 @@ func (s *Service) Cancel(ctx context.Context, orderID, reason string) error {
 	}
 
 	// Check if we need to create a snapshot
-	if err := s.maybeCreateSnapshot(ctx, order); err != nil {
-		_ = err
+	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, order, AggregateType); err != nil {
+		log.Printf("[Order] Failed to create snapshot for order %s: %v", order.ID, err)
 	}
 
 	return nil
