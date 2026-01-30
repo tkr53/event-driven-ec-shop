@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Run Commands
 
 ```bash
-# Start all services (Kafka, PostgreSQL, API, Projector, Notifier, Frontend)
+# Start all services (LocalStack, PostgreSQL, API, Frontend)
 make up
 
 # Stop all services
@@ -14,16 +14,16 @@ make down
 # Start only infrastructure (for local Go development)
 make infra
 
-# Run API server locally (requires infra running)
-go run cmd/api/main.go
+# Build and deploy Lambda functions to LocalStack
+make deploy-local
 
-# Run Projector locally
-go run cmd/projector/main.go
+# Run API server locally (requires infra running)
+make api
 
 # View logs
 make logs
-docker-compose logs api        # API logs only
-docker-compose logs projector  # Projector logs only
+make logs-projector  # Lambda Projector logs
+make logs-notifier   # Lambda Notifier logs
 
 # Clean up (removes volumes/data)
 make clean
@@ -31,23 +31,27 @@ make clean
 
 ## Architecture Overview
 
-This is an **Event-Driven EC Shop** implementing **CQRS** (Command Query Responsibility Segregation) and **Event Sourcing**.
+This is an **Event-Driven EC Shop** implementing **CQRS** (Command Query Responsibility Segregation) and **Event Sourcing** with **AWS Kinesis Data Streams**.
 
 ### Core Pattern: Write/Read Separation
 
 ```
 Write Path:
-  HTTP Request → Command Handler → Domain Service → Event Store (PostgreSQL) → Kafka
+  HTTP Request → Command Handler → Domain Service → DynamoDB (Event Store)
+                                                          ↓
+                                                    (Auto CDC)
+                                                          ↓
+                                                  Kinesis Data Streams
 
 Read Path:
-  Kafka → Projector → Read Tables (PostgreSQL) → Query Handler → HTTP Response
+  Kinesis → Lambda Projector → PostgreSQL (Read Store) → Query Handler → HTTP Response
 ```
 
-### Three Independent Processes
+### Components
 
 1. **API Server** (`cmd/api/main.go`) - HTTP server handling commands and queries
-2. **Projector** (`cmd/projector/main.go`) - Kafka consumer updating read models
-3. **Notifier** (`cmd/notifier/main.go`) - Kafka consumer sending order confirmation emails
+2. **Lambda Projector** (`cmd/lambda/projector/main.go`) - Kinesis consumer updating read models
+3. **Lambda Notifier** (`cmd/lambda/notifier/main.go`) - Kinesis consumer sending order confirmation emails
 
 ### Key Directories
 
@@ -56,26 +60,31 @@ Read Path:
 - `internal/query/` - Query handlers (read operations)
 - `internal/projection/` - Event → Read model transformations
 - `internal/infrastructure/store/` - Event store and read store implementations
+- `internal/infrastructure/kinesis/` - Kinesis record adapter
+- `cmd/lambda/` - Lambda function entry points
+- `infra/terraform/` - Infrastructure as Code
 
 ### Database Tables
 
 | Table | Purpose |
 |-------|---------|
-| `events` | Append-only event store (write side) |
-| `read_products` | Product queries with full-text search |
-| `read_carts` | Cart data (JSONB items) |
-| `read_orders` | Order history (JSONB items) |
-| `read_inventory` | Stock tracking |
-| `read_users` | User accounts |
-| `read_categories` | Product categories |
+| DynamoDB `events` | Append-only event store (write side) |
+| DynamoDB `snapshots` | Aggregate snapshots |
+| PostgreSQL `read_products` | Product queries with full-text search |
+| PostgreSQL `read_carts` | Cart data (JSONB items) |
+| PostgreSQL `read_orders` | Order history (JSONB items) |
+| PostgreSQL `read_inventory` | Stock tracking |
+| PostgreSQL `read_users` | User accounts |
+| PostgreSQL `read_categories` | Product categories |
 
 ### Event Flow
 
 When a command is executed:
-1. Domain service creates events and appends to `events` table
-2. Events are published to Kafka topic `ec-events`
-3. Projector consumes events and updates `read_*` tables
-4. Queries read from `read_*` tables (eventual consistency)
+1. Domain service creates events and appends to DynamoDB `events` table
+2. DynamoDB automatically streams changes to Kinesis Data Streams (CDC)
+3. Lambda Projector consumes events and updates PostgreSQL `read_*` tables
+4. Lambda Notifier consumes events and sends email notifications
+5. Queries read from PostgreSQL `read_*` tables (eventual consistency)
 
 ### Authentication
 
@@ -89,7 +98,7 @@ When a command is executed:
 |---------|-----|
 | Frontend | http://localhost:3000 |
 | API | http://localhost:8080 |
-| Kafka UI | http://localhost:8081 |
+| LocalStack | http://localhost:4566 |
 | Mailpit (email) | http://localhost:8025 |
 
 ## Admin Access

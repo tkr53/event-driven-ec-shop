@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -22,7 +21,6 @@ import (
 	"github.com/example/ec-event-driven/internal/domain/order"
 	"github.com/example/ec-event-driven/internal/domain/product"
 	"github.com/example/ec-event-driven/internal/domain/user"
-	"github.com/example/ec-event-driven/internal/infrastructure/kafka"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/query"
 )
@@ -32,9 +30,6 @@ func main() {
 	defer cancel()
 
 	// Configuration from environment variables
-	kafkaBrokersStr := getEnv("KAFKA_BROKERS", "localhost:9092")
-	kafkaBrokers := strings.Split(kafkaBrokersStr, ",")
-	kafkaTopic := getEnv("KAFKA_TOPIC", "ec-events")
 	postgresConnStr := getEnv("DATABASE_URL", "postgres://ecapp:ecapp@localhost:5432/ecapp?sslmode=disable")
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
@@ -51,16 +46,11 @@ func main() {
 	dynamoEndpoint := os.Getenv("DYNAMODB_ENDPOINT")
 
 	log.Println("[API] ========================================")
-	log.Println("[API] EC Shop - CQRS Mode")
+	log.Println("[API] EC Shop - CQRS Mode (Kinesis)")
 	log.Println("[API] ========================================")
-	log.Printf("[API] Kafka: %v", kafkaBrokers)
-	log.Printf("[API] Topic: %s", kafkaTopic)
 	log.Println("[API] Write DB: DynamoDB (events table)")
 	log.Println("[API] Read DB:  PostgreSQL (read_* tables)")
-
-	// Initialize Kafka producer
-	producer := kafka.NewProducer(kafkaBrokers, kafkaTopic)
-	defer producer.Close()
+	log.Println("[API] Events:   DynamoDB → Kinesis → Lambda")
 
 	// Initialize DynamoDB client
 	dynamoClient, err := newDynamoDBClient(ctx, dynamoRegion, dynamoEndpoint)
@@ -69,7 +59,8 @@ func main() {
 	}
 
 	// Initialize DynamoDB EventStore
-	eventStore := store.NewDynamoEventStore(dynamoClient, dynamoTableName, dynamoSnapshotTableName, producer)
+	// Events are automatically streamed to Kinesis via DynamoDB Kinesis integration
+	eventStore := store.NewDynamoEventStore(dynamoClient, dynamoTableName, dynamoSnapshotTableName)
 	log.Printf("[API] Event Store: DynamoDB (events: %s, snapshots: %s)", dynamoTableName, dynamoSnapshotTableName)
 
 	// Initialize PostgreSQL connection for read store
@@ -102,9 +93,9 @@ func main() {
 	cmdHandler := command.NewHandler(productSvc, cartSvc, orderSvc, inventorySvc, readStore)
 	queryHandler := query.NewHandler(readStore)
 
-	// Note: Read model updates are handled by the separate Projector service
-	// The API only writes events to the event store and publishes to Kafka
-	log.Println("[API] Read model updates delegated to Projector service")
+	// Note: Read model updates are handled by Lambda Projector via Kinesis
+	// The API only writes events to DynamoDB; streaming to Kinesis is automatic
+	log.Println("[API] Read model updates delegated to Lambda Projector (via Kinesis)")
 
 	// Initialize API
 	handlers := api.NewHandlers(cmdHandler, queryHandler)

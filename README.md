@@ -1,10 +1,11 @@
 # EC Shop - Event Driven + CQRS Learning Project
 
-Go + Apache Kafka + PostgreSQL を使った**イベント駆動アーキテクチャ**と**CQRS（Command Query Responsibility Segregation）パターン**を学ぶためのECサイトバックエンドです。
+Go + AWS Kinesis Data Streams + DynamoDB + PostgreSQL を使った**イベント駆動アーキテクチャ**と**CQRS（Command Query Responsibility Segregation）パターン**を学ぶためのECサイトバックエンドです。
 
 **特徴:**
 - **書き込みDB**と**読み取りDB**を完全分離したCQRS実装
-- **非同期プロジェクション**によるイベント駆動の読み取りモデル更新
+- **DynamoDB → Kinesis 自動CDC**によるイベント駆動の読み取りモデル更新
+- **Lambda**による非同期イベント処理
 - **イベントソーシング**による完全な履歴管理
 
 ## 目次
@@ -30,7 +31,7 @@ Go + Apache Kafka + PostgreSQL を使った**イベント駆動アーキテク�
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              Client (Browser)                                │
-│                              http://localhost:8080                           │
+│                              http://localhost:3000                           │
 └─────────────────────────────────┬───────────────────────────────────────────┘
                                   │
                                   ▼
@@ -65,38 +66,28 @@ Go + Apache Kafka + PostgreSQL を使った**イベント駆動アーキテク�
 │            │                                             │                  │
 └────────────┼─────────────────────────────────────────────┼──────────────────┘
              │                                             │
-             ▼                                             │
+             ▼ (自動 CDC)                                  │
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Apache Kafka                                    │
-│                         Topic: ec-events                                     │
+│                         Kinesis Data Streams                                 │
+│                       Stream: ec-events                                      │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │  ProductCreated → StockAdded → ItemAddedToCart → OrderPlaced → ...  │    │
 │  └────────────────────────────────────┬────────────────────────────────┘    │
 └───────────────────────────────────────┼─────────────────────────────────────┘
-                                        │
-                                        ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Projector                                       │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Kafka Consumer → Event Handler → PostgreSQL (Read Tables)          │    │
-│  │  consumer group: "projector"                                         │    │
-│  │                                                                      │    │
-│  │  ProductCreated → read_products に INSERT                           │    │
-│  │  StockAdded     → read_inventory に INSERT/UPDATE                   │    │
-│  │  OrderPlaced    → read_orders に INSERT                             │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Notifier (Email)                                │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Kafka Consumer → Event Handler → SMTP (Mailpit)                    │    │
-│  │  consumer group: "email-notifier"                                    │    │
-│  │                                                                      │    │
-│  │  OrderPlaced → 注文確認メール送信                                     │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
+                              ┌─────────┴─────────┐
+                              ▼                   ▼
+┌─────────────────────────────────────┐  ┌─────────────────────────────────────┐
+│      Lambda Projector               │  │      Lambda Notifier                │
+│  ┌───────────────────────────────┐  │  │  ┌───────────────────────────────┐  │
+│  │ Kinesis → Event Handler       │  │  │  │ Kinesis → Event Handler       │  │
+│  │        → PostgreSQL           │  │  │  │        → SMTP (Mailpit)       │  │
+│  │                               │  │  │  │                               │  │
+│  │ ProductCreated                │  │  │  │ OrderPlaced                   │  │
+│  │   → read_products に INSERT   │  │  │  │   → 注文確認メール送信         │  │
+│  │ StockAdded                    │  │  │  └───────────────────────────────┘  │
+│  │   → read_inventory に UPDATE  │  │  └─────────────────────────────────────┘
+│  └───────────────────────────────┘  │
+└─────────────────────────────────────┘
 ```
 
 ### DB構成（CQRS分離）
@@ -104,10 +95,20 @@ Go + Apache Kafka + PostgreSQL を使った**イベント駆動アーキテク�
 | 用途 | ストレージ | 説明 |
 |------|----------|------|
 | **Write DB** | DynamoDB `events` | イベントストア（追記専用） |
+| **Write DB** | DynamoDB `snapshots` | スナップショット |
 | **Read DB** | PostgreSQL `read_products` | 商品一覧クエリ用 |
 | **Read DB** | PostgreSQL `read_carts` | カート情報クエリ用 |
 | **Read DB** | PostgreSQL `read_orders` | 注文履歴クエリ用 |
 | **Read DB** | PostgreSQL `read_inventory` | 在庫情報クエリ用 |
+
+### DynamoDB → Kinesis 自動CDC
+
+従来の Kafka 構成では、アプリケーション側で DynamoDB 書き込み後に明示的に Kafka へ Publish する必要がありました。この設計には「DynamoDB 書き込み成功 → Kafka Publish 失敗」でデータ不整合が発生するリスクがありました。
+
+現在の構成では、**DynamoDB Kinesis 統合**を使用することで：
+- DynamoDB への書き込みが完了すると**自動的に Kinesis へストリーミング**
+- アプリケーション側でのイベント発行処理が不要
+- **データ不整合のリスクを解消**
 
 ---
 
@@ -135,16 +136,16 @@ Go + Apache Kafka + PostgreSQL を使った**イベント駆動アーキテク�
           Write ───▶│  (データ変更)        │─────▶│ DynamoDB         │
                     └─────────────────────┘      │ events テーブル   │
                                                  └────────┬─────────┘
-                                                          │
+                                                          │ (自動CDC)
                                                           ▼
                                                  ┌──────────────────┐
-                                                 │     Kafka        │
-                                                 │  (非同期配信)     │
+                                                 │ Kinesis Streams  │
+                                                 │  (自動配信)       │
                                                  └────────┬─────────┘
                                                           │
                                                           ▼
                                                  ┌──────────────────┐
-                                                 │   Projector      │
+                                                 │ Lambda Projector │
                                                  │ (イベント変換)    │
                                                  └────────┬─────────┘
                     ┌─────────────────────┐               │
@@ -216,19 +217,20 @@ event-driven-app/
 ├── cmd/                          # エントリーポイント
 │   ├── api/
 │   │   └── main.go              # APIサーバーのメイン
-│   ├── projector/
-│   │   └── main.go              # Projectorワーカーのメイン（独立プロセス）
-│   └── notifier/
-│       └── main.go              # Email Notifierのメイン（独立プロセス）
+│   └── lambda/                  # Lambda関数
+│       ├── projector/
+│       │   └── main.go          # Lambda Projector（Read DB更新）
+│       └── notifier/
+│           └── main.go          # Lambda Notifier（メール送信）
 │
 ├── internal/                     # 内部パッケージ
 │   ├── api/                     # HTTP API層
-│   │   ├── handlers.go          # HTTPハンドラー（リクエスト/レスポンス処理）
+│   │   ├── handlers.go          # HTTPハンドラー
 │   │   └── router.go            # ルーティング設定
 │   │
 │   ├── command/                 # コマンド層（CQRS の Command側）
 │   │   ├── commands.go          # コマンド定義（DTO）
-│   │   └── handler.go           # コマンドハンドラー（ビジネスロジック）
+│   │   └── handler.go           # コマンドハンドラー
 │   │
 │   ├── query/                   # クエリ層（CQRS の Query側）
 │   │   ├── handler.go           # クエリハンドラー
@@ -239,7 +241,7 @@ event-driven-app/
 │   │
 │   ├── domain/                  # ドメイン層（ビジネスロジックの中核）
 │   │   ├── product/
-│   │   │   ├── aggregate.go     # 商品集約（エンティティ + ビジネスルール）
+│   │   │   ├── aggregate.go     # 商品集約
 │   │   │   └── events.go        # 商品ドメインイベント
 │   │   ├── cart/
 │   │   │   ├── aggregate.go     # カート集約
@@ -262,23 +264,31 @@ event-driven-app/
 │   │   └── templates.go         # HTMLメールテンプレート
 │   │
 │   └── infrastructure/          # インフラ層
-│       ├── kafka/
-│       │   ├── producer.go      # Kafkaプロデューサー
-│       │   └── consumer.go      # Kafkaコンシューマー
+│       ├── kinesis/
+│       │   └── record_adapter.go # DynamoDB Streams → Event 変換
 │       └── store/
 │           ├── interface.go           # Event構造体・EventStoreインターフェース
-│           ├── dynamo_event_store.go   # DynamoDB EventStore
-│           ├── read_store.go          # インメモリRead Store（開発用）
+│           ├── dynamo_event_store.go  # DynamoDB EventStore
 │           ├── read_store_interface.go # ReadStoreインターフェース
-│           └── postgres_read_store.go  # PostgreSQL Read Store（本番用）
+│           └── postgres_read_store.go  # PostgreSQL Read Store
 │
-├── web/                         # フロントエンド
-│   └── index.html               # ECサイトUI（SPA）
+├── infra/                       # インフラ定義
+│   └── terraform/               # Terraform IaC
+│       ├── main.tf
+│       ├── dynamodb.tf
+│       ├── kinesis.tf
+│       ├── lambda.tf
+│       └── cloudwatch.tf
 │
-├── docker-compose.yml           # Docker構成
+├── scripts/                     # スクリプト
+│   ├── localstack-init.sh       # LocalStack初期化
+│   └── deploy-lambda-local.sh   # Lambda ローカルデプロイ
+│
+├── frontend/                    # Next.js フロントエンド
+│
+├── docker-compose.yml           # Docker構成（LocalStack使用）
 ├── Dockerfile                   # マルチステージビルド
 ├── init.sql                     # PostgreSQL初期化（read_* テーブル）
-├── init-dynamodb.sh             # DynamoDB Local初期化スクリプト
 ├── Makefile                     # タスクランナー
 ├── go.mod                       # Go モジュール定義
 └── go.sum                       # 依存関係ロック
@@ -295,8 +305,7 @@ event-driven-app/
 | **Domain層** | ビジネスロジック、ドメインイベント定義 | `internal/domain/` |
 | **Projection層** | イベントから読み取りモデルを構築 | `internal/projection/` |
 | **Notification層** | イベントに基づく通知処理 | `internal/notification/` |
-| **Email層** | メール送信サービス | `internal/email/` |
-| **Infrastructure層** | 外部サービス連携（Kafka, PostgreSQL） | `internal/infrastructure/` |
+| **Infrastructure層** | 外部サービス連携（Kinesis, DynamoDB, PostgreSQL） | `internal/infrastructure/` |
 
 ---
 
@@ -305,9 +314,12 @@ event-driven-app/
 | 技術 | 用途 | バージョン |
 |------|------|-----------|
 | **Go** | バックエンド言語 | 1.24 |
-| **Apache Kafka** | メッセージブローカー（イベント配信） | 7.5.0 (Confluent) |
+| **AWS Kinesis Data Streams** | イベントストリーミング | - |
+| **AWS Lambda** | イベント処理（Projector, Notifier） | provided.al2023 |
 | **DynamoDB** | Write DB（イベントストア） | Local / AWS |
 | **PostgreSQL** | Read DB（読み取りモデル） | 16 |
+| **LocalStack** | ローカルAWSエミュレーション | Latest |
+| **Terraform** | Infrastructure as Code | >= 1.0 |
 | **Docker** | コンテナ化 | - |
 
 ### データベース設計
@@ -315,6 +327,7 @@ event-driven-app/
 | DB | テーブル | 用途 |
 |----|----------|------|
 | **Write DB (DynamoDB)** | `events` | イベントソース（Append-Only） |
+| **Write DB (DynamoDB)** | `snapshots` | スナップショット |
 | **Read DB (PostgreSQL)** | `read_products` | 商品クエリ用（非正規化） |
 | **Read DB (PostgreSQL)** | `read_carts` | カートクエリ用（JSONカラム使用） |
 | **Read DB (PostgreSQL)** | `read_orders` | 注文クエリ用（JSONカラム使用） |
@@ -330,16 +343,19 @@ event-driven-app/
 GSI1 (全イベント取得用):
 - Partition Key: gsi1pk (固定値 "EVENTS")
 - Sort Key: created_at (String - ISO8601)
+
+Kinesis Data Streams 統合:
+- DynamoDB への書き込みが自動的に Kinesis へストリーミング
 ```
 
 ### 使用ライブラリ
 
 | ライブラリ | 用途 |
 |-----------|------|
-| `github.com/segmentio/kafka-go` | Kafkaクライアント |
+| `github.com/aws/aws-lambda-go` | Lambda ランタイム |
+| `github.com/aws/aws-sdk-go-v2` | AWS SDK（DynamoDB用） |
 | `github.com/lib/pq` | PostgreSQLドライバ |
 | `github.com/google/uuid` | UUID生成 |
-| `github.com/aws/aws-sdk-go-v2` | AWS SDK（DynamoDB用） |
 
 ---
 
@@ -348,7 +364,8 @@ GSI1 (全イベント取得用):
 ### 必要条件
 
 - Docker & Docker Compose
-- Go 1.23+ （ローカル開発時）
+- Go 1.24+ （ローカル開発時）
+- AWS CLI（状態確認用、オプション）
 
 ### 起動方法
 
@@ -356,32 +373,32 @@ GSI1 (全イベント取得用):
 # リポジトリをクローン
 cd event-driven-app
 
-# 1. インフラを起動（Kafka, PostgreSQL, DynamoDB）
+# 1. インフラを起動（LocalStack, PostgreSQL, Mailpit）
 make infra
 
-# 2. DynamoDB テーブルを初期化（初回のみ、起動完了を待機）
-./init-dynamodb.sh
+# 2. LocalStack の初期化完了を待つ（約20秒）
+docker-compose logs -f localstack
+# "LocalStack Initialization Complete" が表示されるまで待機
 
-# 3. 全サービスを起動
+# 3. Lambda関数をビルド＆デプロイ
+make deploy-local
+
+# 4. APIサーバーを起動
+export JWT_SECRET="change-this-secret-in-production-min-32-chars"
+export DYNAMODB_ENDPOINT="http://localhost:4566"
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+make api
+```
+
+### Docker Compose で全サービス起動
+
+```bash
+# 全サービスを起動（API, Frontend を含む）
 make up
 
 # ログを確認
 make logs
-```
-
-### ローカル開発（go runで起動）
-
-```bash
-# 1. インフラを起動
-make infra
-
-# 2. DynamoDB テーブルを初期化（初回のみ）
-./init-dynamodb.sh
-
-# 3. APIを起動（go run）
-DYNAMODB_ENDPOINT=http://localhost:8000 \
-JWT_SECRET=your-secret-key-at-least-32-characters \
-go run cmd/api/main.go
 ```
 
 ### 環境変数
@@ -389,12 +406,11 @@ go run cmd/api/main.go
 | 変数名 | 説明 | デフォルト |
 |--------|------|------------|
 | `DYNAMODB_TABLE_NAME` | DynamoDBテーブル名 | `events` |
+| `DYNAMODB_SNAPSHOT_TABLE_NAME` | スナップショットテーブル名 | `snapshots` |
 | `DYNAMODB_REGION` | AWSリージョン | `ap-northeast-1` |
 | `DYNAMODB_ENDPOINT` | ローカル開発用エンドポイント | (空=AWS本番) |
-
-### DynamoDB Admin UI
-
-DynamoDB Localのデータを確認するには http://localhost:8001 にアクセスしてください。
+| `JWT_SECRET` | JWT署名用シークレット（32文字以上） | - |
+| `DATABASE_URL` | PostgreSQL接続文字列 | - |
 
 ### サービス一覧
 
@@ -402,12 +418,10 @@ DynamoDB Localのデータを確認するには http://localhost:8001 にアク�
 |---------|------------|------|
 | **EC Shop UI** | http://localhost:3000 | Next.js フロントエンド |
 | **API Server** | http://localhost:8080 | REST API（Command + Query） |
-| **Projector** | - | Kafkaコンシューマー（Read DB更新） |
-| **Notifier** | - | Kafkaコンシューマー（メール送信） |
-| **Kafka UI** | http://localhost:8081 | Kafkaモニタリング |
+| **Lambda Projector** | - | Kinesis Consumer（Read DB更新） |
+| **Lambda Notifier** | - | Kinesis Consumer（メール送信） |
+| **LocalStack** | http://localhost:4566 | AWS サービスエミュレーション |
 | **Mailpit** | http://localhost:8025 | 開発用メールサーバ（受信メール確認） |
-| **DynamoDB Local** | http://localhost:8000 | Write DB（イベントストア） |
-| **DynamoDB Admin** | http://localhost:8001 | DynamoDBモニタリングUI |
 | **PostgreSQL** | localhost:5432 | Read DB（読み取りモデル） |
 
 ### 初期管理者アカウント
@@ -417,9 +431,24 @@ DynamoDB Localのデータを確認するには http://localhost:8001 にアク�
 | メール | `admin@example.com` |
 | パスワード | `admin123` |
 
-管理画面（http://localhost:3000/admin）にアクセスするには、上記アカウントでログインしてください。
+### 状態確認コマンド
 
-**注意:** 本番環境ではパスワードを変更してください。
+```bash
+# DynamoDB テーブル確認
+make dynamodb-status
+
+# Kinesis ストリーム確認
+make kinesis-status
+
+# Lambda 関数一覧
+make lambda-list
+
+# Lambda Projector ログ
+make logs-projector
+
+# Lambda Notifier ログ
+make logs-notifier
+```
 
 ### 停止・クリーンアップ
 
@@ -437,7 +466,7 @@ make clean
 
 ### Web UI での操作
 
-1. http://localhost:8080 にアクセス
+1. http://localhost:3000 にアクセス
 2. **Admin** タブで商品を登録
 3. **Products** タブで商品をカートに追加
 4. **Cart** タブで注文を確定
@@ -467,11 +496,6 @@ curl -X POST http://localhost:8080/orders
 
 # 注文一覧
 curl http://localhost:8080/orders
-
-# 注文キャンセル
-curl -X POST http://localhost:8080/orders/<order_id>/cancel \
-  -H "Content-Type: application/json" \
-  -d '{"reason": "気が変わった"}'
 ```
 
 ---
@@ -522,12 +546,6 @@ type Cart struct {
     ID     string              // カートID
     UserID string              // ユーザーID
     Items  map[string]CartItem // 商品ID → アイテム
-}
-
-type CartItem struct {
-    ProductID string // 商品ID
-    Quantity  int    // 数量
-    Price     int    // 単価
 }
 ```
 
@@ -583,7 +601,7 @@ type Inventory struct {
 | `OrderShipped` | 出荷時 | order_id |
 | `OrderCancelled` | キャンセル時 | order_id, reason |
 
-**メール通知:** `OrderPlaced` イベント発生時、Notifierサービスが注文確認メールを送信します。開発環境では Mailpit (http://localhost:8025) で受信メールを確認できます。
+**メール通知:** `OrderPlaced` イベント発生時、Lambda Notifier が注文確認メールを送信します。
 
 ### 在庫イベント
 
@@ -598,7 +616,7 @@ type Inventory struct {
 
 ## データフロー
 
-### 商品登録フロー（非同期プロジェクション）
+### 商品登録フロー
 
 ```
 1. POST /products
@@ -612,25 +630,21 @@ type Inventory struct {
 3. Event Store (DynamoDB)
    └─ PutItem events (ProductCreated, StockAdded)
        │
-       ▼
-4. Kafka Producer
-   └─ Topic: ec-events に発行
+       ▼ (自動 CDC)
+4. Kinesis Data Streams
+   └─ DynamoDB Kinesis 統合により自動ストリーミング
        │
        ▼
-5. Kafka Consumer (Projector)
-   └─ イベントを受信
-       │
-       ▼
-6. Projector
+5. Lambda Projector
    ├─ ProductCreated → INSERT INTO read_products (PostgreSQL)
    └─ StockAdded     → INSERT INTO read_inventory (PostgreSQL)
        │
        ▼
-7. Query Handler
+6. Query Handler
    └─ SELECT * FROM read_products (PostgreSQL)
 ```
 
-### 注文フロー（非同期プロジェクション）
+### 注文フロー
 
 ```
 1. POST /orders
@@ -639,302 +653,128 @@ type Inventory struct {
 2. Command Handler
    ├─ カートからアイテム取得（read_carts から）
    ├─ OrderService.Place()       → OrderPlaced イベント
-   ├─ InventoryService.Reserve() → StockReserved イベント (各アイテム)
+   ├─ InventoryService.Reserve() → StockReserved イベント
    └─ CartService.Clear()        → CartCleared イベント
        │
        ▼
 3. Event Store (DynamoDB)
-   └─ PutItem events (OrderPlaced, StockReserved, CartCleared)
+   └─ PutItem events
        │
-       ▼
-4. Kafka Producer
-   └─ 各イベントを Topic: ec-events に発行
+       ▼ (自動 CDC)
+4. Kinesis Data Streams
        │
-       ▼
-5. Projector (非同期)
-   ├─ OrderPlaced    → INSERT INTO read_orders (PostgreSQL)
-   ├─ StockReserved  → UPDATE read_inventory (PostgreSQL)
-   │                 → UPDATE read_products (PostgreSQL)
-   └─ CartCleared    → UPDATE read_carts (PostgreSQL)
-```
-
-### イベントリプレイ（起動時）
-
-```
-API Server 起動
-       │
-       ▼
-Event Store から全イベント取得
-   └─ DynamoDB Query (GSI1: gsi1pk = "EVENTS")
-       │
-       ▼
-Projector でイベントをリプレイ
-   └─ 各イベントを順番に処理
-       │
-       ▼
-Read DB (PostgreSQL) が再構築される
-   └─ read_products, read_carts, read_orders, read_inventory
-       │
-       ▼
-Kafka Consumer 開始
-   └─ 新規イベントをリアルタイムで処理
+       ├────────────────────────────┐
+       ▼                            ▼
+5. Lambda Projector           Lambda Notifier
+   ├─ OrderPlaced              └─ OrderPlaced
+   │  → INSERT read_orders        → 注文確認メール送信
+   ├─ StockReserved
+   │  → UPDATE read_inventory
+   └─ CartCleared
+      → UPDATE read_carts
 ```
 
 ---
 
 ## コード解説
 
-### 1. イベントの定義 (`internal/domain/product/events.go`)
+### 1. Kinesis Record Adapter (`internal/infrastructure/kinesis/record_adapter.go`)
 
 ```go
-// イベントタイプの定数
-const (
-    EventProductCreated = "ProductCreated"
-    EventProductUpdated = "ProductUpdated"
-    EventProductDeleted = "ProductDeleted"
-)
+// DynamoDB Streams 形式のレコードを store.Event に変換
+func ConvertFromKinesisRecord(record events.KinesisEventRecord) (*store.Event, error) {
+    var dynamoDBRecord events.DynamoDBEventRecord
+    json.Unmarshal(record.Kinesis.Data, &dynamoDBRecord)
 
-// イベントデータ構造体
-type ProductCreated struct {
-    ProductID   string    `json:"product_id"`
-    Name        string    `json:"name"`
-    Description string    `json:"description"`
-    Price       int       `json:"price"`
-    Stock       int       `json:"stock"`
-    CreatedAt   time.Time `json:"created_at"`
+    // INSERT イベントのみ処理（新規イベント）
+    if dynamoDBRecord.EventName != "INSERT" {
+        return nil, nil
+    }
+
+    return convertDynamoDBImage(dynamoDBRecord.Change.NewImage)
 }
 ```
 
 **ポイント:**
-- イベントは**過去形**で命名（Created, Updated, Deleted）
-- イベントは**不変（イミュータブル）** - 一度作成したら変更しない
-- イベントには**発生時刻**を含める
+- DynamoDB Kinesis 統合では、DynamoDB Streams 形式でデータが送られる
+- `INSERT` イベントのみを処理し、`MODIFY`/`REMOVE` は無視
+- Lambda の BatchItemFailures で部分的な再試行が可能
 
-### 2. 集約（Aggregate）の実装 (`internal/domain/product/aggregate.go`)
+### 2. Lambda Projector (`cmd/lambda/projector/main.go`)
 
 ```go
-type Service struct {
-    eventStore store.EventStoreInterface
-}
+func handler(ctx context.Context, kinesisEvent events.KinesisEvent) (events.KinesisEventResponse, error) {
+    var batchItemFailures []events.KinesisBatchItemFailure
 
-func (s *Service) Create(ctx context.Context, name, description string, price, stock int) (*Product, error) {
-    // 1. バリデーション
-    if name == "" {
-        return nil, ErrInvalidName
-    }
-    if price <= 0 {
-        return nil, ErrInvalidPrice
-    }
+    for _, record := range kinesisEvent.Records {
+        event, err := kinesis.ConvertFromKinesisRecord(record)
+        if err != nil {
+            batchItemFailures = append(batchItemFailures, events.KinesisBatchItemFailure{
+                ItemIdentifier: record.Kinesis.SequenceNumber,
+            })
+            continue
+        }
 
-    // 2. 新しいIDを生成
-    productID := uuid.New().String()
-
-    // 3. イベントを作成
-    event := ProductCreated{
-        ProductID:   productID,
-        Name:        name,
-        Description: description,
-        Price:       price,
-        Stock:       stock,
-        CreatedAt:   time.Now(),
+        // 既存の Projector を再利用
+        eventJSON, _ := json.Marshal(event)
+        projector.HandleEvent(ctx, []byte(event.AggregateID), eventJSON)
     }
 
-    // 4. イベントを保存（Event Store → Kafka）
-    _, err := s.eventStore.Append(ctx, productID, AggregateType, EventProductCreated, event)
-    if err != nil {
-        return nil, err
-    }
-
-    // 5. 結果を返す
-    return &Product{
-        ID:    productID,
-        Name:  name,
-        Price: price,
-        Stock: stock,
-    }, nil
+    return events.KinesisEventResponse{BatchItemFailures: batchItemFailures}, nil
 }
 ```
 
 **ポイント:**
-- 集約は**ビジネスルール**を守る責務を持つ
-- 状態変更は必ず**イベントを発行**して行う
-- イベントを保存すると**自動的にKafkaに発行**される
+- 既存の `projection.Projector` を Lambda から呼び出し
+- `BatchItemFailures` で失敗したレコードのみ再試行
 
-### 3. コマンドハンドラー (`internal/command/handler.go`)
-
-```go
-func (h *Handler) CreateProduct(ctx context.Context, cmd CreateProduct) (*product.Product, error) {
-    // 1. ドメインサービスを呼び出し（ProductCreatedイベント発行）
-    p, err := h.productSvc.Create(ctx, cmd.Name, cmd.Description, cmd.Price, cmd.Stock)
-    if err != nil {
-        return nil, err
-    }
-
-    // 2. 在庫を初期化（StockAddedイベント発行）
-    if err := h.inventorySvc.AddStock(ctx, p.ID, cmd.Stock); err != nil {
-        return nil, err
-    }
-
-    // Read Store は Kafka Consumer (Projector) 経由で非同期更新される
-    // ここでは読み取りモデルを直接更新しない
-
-    return p, nil
-}
-```
-
-**ポイント:**
-- コマンドハンドラーは**ユースケース**を実装
-- 複数の集約をまたぐ操作を**調整（オーケストレーション）**
-- **非同期プロジェクション** - 読み取りモデルはKafka経由で更新
-- 書き込みと読み取りの**完全分離**
-
-### 4. プロジェクター (`internal/projection/projector.go`)
+### 3. イベントストア (`internal/infrastructure/store/dynamo_event_store.go`)
 
 ```go
-func (p *Projector) HandleEvent(ctx context.Context, key, value []byte) error {
-    var event store.Event
-    json.Unmarshal(value, &event)
-
-    log.Printf("[Projector] Received event: %s (aggregate: %s)",
-        event.EventType, event.AggregateType)
-
-    // イベントタイプに応じて読み取りモデルを更新
-    switch event.AggregateType {
-    case product.AggregateType:
-        return p.handleProductEvent(event)
-    case cart.AggregateType:
-        return p.handleCartEvent(event)
-    case order.AggregateType:
-        return p.handleOrderEvent(event)
-    case inventory.AggregateType:
-        return p.handleInventoryEvent(event)
-    }
-    return nil
-}
-
-func (p *Projector) handleProductEvent(event store.Event) error {
-    switch event.EventType {
-    case product.EventProductCreated:
-        var e product.ProductCreated
-        json.Unmarshal(event.Data, &e)
-
-        // PostgreSQL の read_products テーブルに INSERT/UPDATE
-        p.readStore.Set("products", e.ProductID, &readmodel.ProductReadModel{
-            ID:          e.ProductID,
-            Name:        e.Name,
-            Description: e.Description,
-            Price:       e.Price,
-            Stock:       e.Stock,
-            CreatedAt:   e.CreatedAt,
-            UpdatedAt:   e.CreatedAt,
-        })
-    }
-    return nil
-}
-```
-
-**ポイント:**
-- プロジェクターは**Kafkaからイベントを購読**
-- **イベントタイプごと**に処理を分岐
-- 読み取りモデルは**PostgreSQLに永続化**
-- ReadStoreInterface により**インメモリ/PostgreSQLを切り替え可能**
-
-### 5. PostgreSQL Read Store (`internal/infrastructure/store/postgres_read_store.go`)
-
-```go
-// ReadStoreInterface を実装
-type PostgresReadStore struct {
-    db *sql.DB
-}
-
-func (rs *PostgresReadStore) Set(collection, id string, data any) {
-    switch collection {
-    case "products":
-        p := data.(*readmodel.ProductReadModel)
-        rs.db.Exec(`
-            INSERT INTO read_products (id, name, description, price, stock, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
-                description = EXCLUDED.description,
-                price = EXCLUDED.price,
-                stock = EXCLUDED.stock,
-                updated_at = EXCLUDED.updated_at
-        `, p.ID, p.Name, p.Description, p.Price, p.Stock, p.CreatedAt, p.UpdatedAt)
-    // ...他のコレクションも同様
-    }
-}
-```
-
-**ポイント:**
-- `ON CONFLICT DO UPDATE` で **UPSERT** を実現
-- 読み取りモデルは**クエリに最適化**された形式
-- インターフェースにより**テスト時はインメモリ**に差し替え可能
-
-### 5. イベントストア (`internal/infrastructure/store/dynamo_event_store.go`)
-
-```go
+// Append stores an event in DynamoDB.
+// Events are automatically streamed to Kinesis via DynamoDB Kinesis integration.
 func (es *DynamoEventStore) Append(ctx context.Context, aggregateID, aggregateType, eventType string, data any) (*Event, error) {
-    // 1. JSONシリアライズ
-    jsonData, _ := json.Marshal(data)
-
-    // 2. 次のバージョン番号を取得
-    version, _ := es.getNextVersion(ctx, aggregateID)
-
-    // 3. DynamoDBアイテムを作成
-    item := dynamoEvent{
-        AggregateID:   aggregateID,
-        Version:       version,
-        ID:            uuid.New().String(),
-        AggregateType: aggregateType,
-        EventType:     eventType,
-        Data:          string(jsonData),
-        CreatedAt:     time.Now().Format(time.RFC3339Nano),
-        GSI1PK:        "EVENTS", // GetAllEvents用のGSI
-    }
-
-    // 4. DynamoDBに保存（条件付き書き込みで楽観的ロック）
+    // 1. DynamoDB にイベントを保存
     es.client.PutItem(ctx, &dynamodb.PutItemInput{
         TableName:           aws.String(es.tableName),
         Item:                av,
         ConditionExpression: aws.String("attribute_not_exists(aggregate_id) AND attribute_not_exists(version)"),
     })
 
-    // 5. Kafkaに発行
-    es.producer.Publish(ctx, aggregateID, event)
+    // 2. Kinesis へのストリーミングは DynamoDB が自動で行う
+    //    アプリケーション側での Publish 処理は不要
 
     return &event, nil
 }
 ```
 
 **ポイント:**
-- **Append-Only** - イベントは追加のみ、更新・削除しない
-- **条件付き書き込み**で楽観的ロックを実現（重複バージョン防止）
-- **GSI1** でGetAllEvents（全イベント取得）を効率的に実行
-- DynamoDB保存 → Kafka発行の**二重書き込み**
+- **Append-Only** - イベントは追加のみ
+- **条件付き書き込み**で楽観的ロック
+- **自動CDC** - Kafka Publish 処理が不要になり、コードがシンプルに
 
 ---
 
 ## 学習ポイント
 
-### 1. イベント駆動の利点を体験する
+### 1. 自動CDCの利点を体験する
 
 ```bash
-# イベントストア（Write DB - DynamoDB）を確認
-# DynamoDB Admin UI (http://localhost:8001) でeventsテーブルを確認
+# DynamoDB へのイベント書き込みを確認
+make dynamodb-status
 
-# 読み取りモデル（Read DB - PostgreSQL）を確認
-docker-compose exec postgres psql -U ecapp -c "SELECT * FROM read_products;"
-docker-compose exec postgres psql -U ecapp -c "SELECT * FROM read_inventory;"
+# Kinesis への自動ストリーミングを確認
+make kinesis-status
+
+# Lambda の処理ログを確認
+make logs-projector
 ```
 
 **確認ポイント:**
-- すべての操作が**イベントとしてDynamoDBに記録**されている
-- 読み取りモデルは**PostgreSQLの別テーブル**に最適化された形式で保存
+- DynamoDB への書き込みが自動的に Kinesis へストリーミング
+- アプリケーション側でのイベント発行処理が不要
 
 ### 2. 結果整合性を体験する
-
-このプロジェクトでは**非同期プロジェクション**を採用しています。
 
 ```bash
 # 商品を登録
@@ -947,55 +787,26 @@ curl http://localhost:8080/products
 ```
 
 **確認ポイント:**
-- 書き込み直後は読み取りモデルに**反映されていない可能性**がある
-- 数百ミリ秒後には**結果整合性**で反映される
+- 書き込み直後は読み取りモデルに**反映されていない可能性**
+- Lambda の処理後に**結果整合性**で反映される
 
-### 3. イベントリプレイを試す
+### 3. Lambda のスケーラビリティを理解する
 
 ```bash
-# 読み取りテーブルをクリア
-docker-compose exec postgres psql -U ecapp -c "TRUNCATE read_products, read_carts, read_orders, read_inventory;"
+# 複数のイベントを連続で発行
+for i in {1..10}; do
+  curl -X POST http://localhost:8080/products \
+    -H "Content-Type: application/json" \
+    -d "{\"name\": \"商品$i\", \"price\": 1000, \"stock\": 10}"
+done
 
-# APIを再起動（イベントリプレイが実行される）
-docker-compose restart api
-
-# ログを確認
-docker-compose logs api | grep "Replaying"
-# → [API] Replaying 5 events from event store...
-# → [API] Event replay completed - read models rebuilt
-
-# 読み取りモデルが復元されていることを確認
-docker-compose exec postgres psql -U ecapp -c "SELECT * FROM read_products;"
+# Lambda のログで並列処理を確認
+make logs-projector
 ```
 
 **確認ポイント:**
-- イベントストアから**過去のイベントを再生**
-- 読み取りモデルが**完全に再構築**される
-
-### 4. 書き込みDBと読み取りDBの分離を確認
-
-```bash
-# 書き込みDB（DynamoDB events）のレコード数
-# DynamoDB Admin UI (http://localhost:8001) でeventsテーブルのアイテム数を確認
-
-# 読み取りDB（PostgreSQL read_products）のレコード数
-docker-compose exec postgres psql -U ecapp -c "SELECT COUNT(*) FROM read_products;"
-```
-
-**確認ポイント:**
-- DynamoDB eventsには**すべてのイベント**（更新・削除含む）
-- PostgreSQL read_productsには**現在の状態のみ**
-
-### 5. スケーラビリティを理解する
-
-```bash
-# Projectorを複数起動（Kafkaコンシューマーグループで分散処理）
-docker-compose up -d --scale projector=2
-```
-
-**確認ポイント:**
-- 複数のProjectorが**同じ読み取りDBを更新**
-- Kafkaコンシューマーグループにより**負荷分散**
+- Lambda は自動的にスケール
+- Kinesis のシャード数に応じた並列処理
 
 ---
 
@@ -1004,11 +815,11 @@ docker-compose up -d --scale projector=2
 このプロジェクトをベースに、以下の機能を追加してみましょう：
 
 1. **Saga パターン** - 複数サービス間の分散トランザクション管理
-2. **Outbox パターン** - イベント発行の信頼性向上（二重書き込み問題の解決）
-3. **スナップショット** - イベントリプレイの高速化（大量イベント対策）
-4. **別種の読み取りDB** - Elasticsearchで全文検索、Redisでキャッシュなど
-5. **イベントバージョニング** - イベントスキーマの進化管理
-6. **Idempotency（冪等性）** - 同じイベントの重複処理防止
+2. **スナップショット最適化** - 大量イベントに対するリプレイの高速化
+3. **別種の読み取りDB** - Elasticsearch で全文検索、Redis でキャッシュなど
+4. **イベントバージョニング** - イベントスキーマの進化管理
+5. **Firehose → S3** - イベントのアーカイブとデータレイク構築
+6. **CloudWatch Alarms** - 本番運用のためのモニタリング
 
 ---
 

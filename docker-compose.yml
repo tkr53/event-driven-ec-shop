@@ -1,41 +1,25 @@
 services:
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
+  localstack:
+    image: localstack/localstack:latest
     ports:
-      - "9092:9092"
+      - "4566:4566"  # LocalStack Gateway
+      - "4510-4559:4510-4559"  # External services port range
     environment:
-      # KRaft mode settings (no Zookeeper required)
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      # Listener settings
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      # Cluster settings
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      # KRaft cluster ID
-      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      - DEBUG=1
+      - SERVICES=dynamodb,kinesis,lambda,s3,iam,logs
+      - LAMBDA_EXECUTOR=docker
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - AWS_DEFAULT_REGION=ap-northeast-1
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - localstack_data:/var/lib/localstack
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    depends_on:
-      - kafka
-    ports:
-      - "8081:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      start_period: 20s
 
   mailpit:
     image: axllent/mailpit:latest
@@ -43,30 +27,6 @@ services:
       - "1025:1025"
       - "8025:8025"
     restart: unless-stopped
-
-  dynamodb-local:
-    image: amazon/dynamodb-local:latest
-    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
-    ports:
-      - "8000:8000"
-    healthcheck:
-      test: ["CMD-SHELL", "exit 0"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-
-  dynamodb-admin:
-    image: aaronshaf/dynamodb-admin:latest
-    ports:
-      - "8001:8001"
-    environment:
-      DYNAMO_ENDPOINT: http://dynamodb-local:8000
-      AWS_REGION: ap-northeast-1
-      AWS_ACCESS_KEY_ID: dummy
-      AWS_SECRET_ACCESS_KEY: dummy
-    depends_on:
-      - dynamodb-local
 
   postgres:
     image: postgres:16-alpine
@@ -93,68 +53,20 @@ services:
       - "8080:8080"
     environment:
       DATABASE_URL: postgres://ecapp:ecapp@postgres:5432/ecapp?sslmode=disable
-      KAFKA_BROKERS: kafka:29092
-      KAFKA_TOPIC: ec-events
       JWT_SECRET: ${JWT_SECRET:-change-this-secret-in-production-min-32-chars}
-      # DynamoDB EventStore configuration
-      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      # DynamoDB EventStore configuration (LocalStack)
+      DYNAMODB_ENDPOINT: http://localstack:4566
       DYNAMODB_TABLE_NAME: ${DYNAMODB_TABLE_NAME:-events}
       DYNAMODB_SNAPSHOT_TABLE_NAME: ${DYNAMODB_SNAPSHOT_TABLE_NAME:-snapshots}
       DYNAMODB_REGION: ${DYNAMODB_REGION:-ap-northeast-1}
-      # AWS credentials for DynamoDB Local
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-dummy}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-dummy}
+      # AWS credentials for LocalStack
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
     depends_on:
       postgres:
         condition: service_healthy
-      kafka:
+      localstack:
         condition: service_healthy
-      dynamodb-local:
-        condition: service_healthy
-    restart: unless-stopped
-
-  projector:
-    build:
-      context: .
-      target: projector
-    environment:
-      DATABASE_URL: postgres://ecapp:ecapp@postgres:5432/ecapp?sslmode=disable
-      KAFKA_BROKERS: kafka:29092
-      KAFKA_TOPIC: ec-events
-      # DynamoDB configuration for event replay
-      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
-      DYNAMODB_TABLE_NAME: ${DYNAMODB_TABLE_NAME:-events}
-      DYNAMODB_SNAPSHOT_TABLE_NAME: ${DYNAMODB_SNAPSHOT_TABLE_NAME:-snapshots}
-      DYNAMODB_REGION: ${DYNAMODB_REGION:-ap-northeast-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-dummy}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-dummy}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-      dynamodb-local:
-        condition: service_healthy
-    restart: unless-stopped
-
-  notifier:
-    build:
-      context: .
-      target: notifier
-    environment:
-      DATABASE_URL: postgres://ecapp:ecapp@postgres:5432/ecapp?sslmode=disable
-      KAFKA_BROKERS: kafka:29092
-      KAFKA_TOPIC: ec-events
-      SMTP_HOST: mailpit
-      SMTP_PORT: "1025"
-      SMTP_FROM: noreply@example.com
-    depends_on:
-      postgres:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-      mailpit:
-        condition: service_started
     restart: unless-stopped
 
   frontend:
@@ -174,3 +86,4 @@ services:
 
 volumes:
   postgres_data:
+  localstack_data:

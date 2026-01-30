@@ -10,16 +10,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/example/ec-event-driven/internal/infrastructure/kafka"
 	"github.com/google/uuid"
 )
 
-// DynamoEventStore stores events in DynamoDB
+// DynamoEventStore stores events in DynamoDB.
+// Events are automatically streamed to Kinesis Data Streams via DynamoDB Kinesis integration.
 type DynamoEventStore struct {
 	client            *dynamodb.Client
 	tableName         string
 	snapshotTableName string
-	producer          *kafka.Producer
 }
 
 // dynamoEvent represents the DynamoDB item structure
@@ -34,16 +33,16 @@ type dynamoEvent struct {
 	GSI1PK        string `dynamodbav:"gsi1pk"`
 }
 
-func NewDynamoEventStore(client *dynamodb.Client, tableName, snapshotTableName string, producer *kafka.Producer) *DynamoEventStore {
+func NewDynamoEventStore(client *dynamodb.Client, tableName, snapshotTableName string) *DynamoEventStore {
 	return &DynamoEventStore{
 		client:            client,
 		tableName:         tableName,
 		snapshotTableName: snapshotTableName,
-		producer:          producer,
 	}
 }
 
-// Append stores an event in DynamoDB and publishes to Kafka
+// Append stores an event in DynamoDB.
+// Events are automatically streamed to Kinesis via DynamoDB Kinesis integration.
 func (es *DynamoEventStore) Append(ctx context.Context, aggregateID, aggregateType, eventType string, data any) (*Event, error) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -85,7 +84,7 @@ func (es *DynamoEventStore) Append(ctx context.Context, aggregateID, aggregateTy
 		return nil, fmt.Errorf("failed to put event: %w", err)
 	}
 
-	event := Event{
+	return &Event{
 		ID:            eventID,
 		AggregateID:   aggregateID,
 		AggregateType: aggregateType,
@@ -93,16 +92,7 @@ func (es *DynamoEventStore) Append(ctx context.Context, aggregateID, aggregateTy
 		Data:          jsonData,
 		Timestamp:     timestamp,
 		Version:       version,
-	}
-
-	// Publish to Kafka
-	if es.producer != nil {
-		if err := es.producer.Publish(ctx, aggregateID, event); err != nil {
-			return nil, err
-		}
-	}
-
-	return &event, nil
+	}, nil
 }
 
 // getNextVersion queries for the current max version and returns the next one
