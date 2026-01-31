@@ -68,7 +68,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("[API] Failed to connect to PostgreSQL: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("[API] Error closing database: %v", err)
+		}
+	}()
 	log.Println("[API] Connected to PostgreSQL (read store)")
 
 	// Initialize read store
@@ -136,7 +140,9 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
-	server.Shutdown(shutdownCtx)
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("[API] Error shutting down server: %v", err)
+	}
 }
 
 func getEnv(key, defaultValue string) string {
@@ -153,22 +159,17 @@ func newDynamoDBClient(ctx context.Context, region, endpoint string) (*dynamodb.
 
 	if endpoint != "" {
 		// Local development with DynamoDB Local
-		cfg, err = config.LoadDefaultConfig(ctx,
-			config.WithRegion(region),
-			config.WithEndpointResolverWithOptions(
-				aws.EndpointResolverWithOptionsFunc(func(service, reg string, options ...interface{}) (aws.Endpoint, error) {
-					return aws.Endpoint{
-						URL:           endpoint,
-						SigningRegion: reg,
-					}, nil
-				}),
-			),
-		)
-	} else {
-		// Production AWS
 		cfg, err = config.LoadDefaultConfig(ctx, config.WithRegion(region))
+		if err != nil {
+			return nil, err
+		}
+		return dynamodb.NewFromConfig(cfg, func(o *dynamodb.Options) {
+			o.BaseEndpoint = &endpoint
+		}), nil
 	}
 
+	// Production AWS
+	cfg, err = config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
 		return nil, err
 	}

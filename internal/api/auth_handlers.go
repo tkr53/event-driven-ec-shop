@@ -135,11 +135,11 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 	// Generate tokens and set cookies
 	h.setAuthCookies(w, userModel.ID, userModel.Email, userModel.Role, r)
 
-	// Record login event
+	// Record login event (best-effort, don't fail login on error)
 	sessionID := uuid.New().String()
 	ipAddress := r.RemoteAddr
 	userAgent := r.UserAgent()
-	h.userService.RecordLogin(r.Context(), userModel.ID, sessionID, ipAddress, userAgent)
+	_ = h.userService.RecordLogin(r.Context(), userModel.ID, sessionID, ipAddress, userAgent)
 
 	respondJSON(w, http.StatusOK, AuthResponse{
 		User: UserResponse{
@@ -157,15 +157,15 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
 	claims, ok := middleware.GetUserFromContext(r.Context())
 	if ok {
-		// Record logout event
+		// Record logout event (best-effort)
 		sessionID := ""
 		if cookie, err := r.Cookie("session_id"); err == nil {
 			sessionID = cookie.Value
 		}
-		h.userService.RecordLogout(r.Context(), claims.UserID, sessionID)
+		_ = h.userService.RecordLogout(r.Context(), claims.UserID, sessionID)
 
-		// Delete user sessions
-		h.readStore.DeleteSessionsByUserID(claims.UserID)
+		// Delete user sessions (best-effort)
+		_ = h.readStore.DeleteSessionsByUserID(claims.UserID)
 	}
 
 	// Clear cookies
@@ -211,7 +211,7 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	// Check session expiration
 	if time.Now().After(session.ExpiresAt) {
-		h.readStore.Delete("sessions", sessionCookie.Value)
+		_ = h.readStore.Delete("sessions", sessionCookie.Value)
 		h.clearAuthCookies(w)
 		respondJSONError(w, "Session expired", http.StatusUnauthorized)
 		return
@@ -240,7 +240,7 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Delete old session
-	h.readStore.Delete("sessions", sessionCookie.Value)
+	_ = h.readStore.Delete("sessions", sessionCookie.Value)
 
 	// Generate new tokens (this will create a new session)
 	h.setAuthCookies(w, userModel.ID, userModel.Email, userModel.Role, r)
@@ -333,7 +333,7 @@ func (h *AuthHandlers) setAuthCookies(w http.ResponseWriter, userID, email, role
 	sessionID := uuid.New().String()
 
 	// Store session with hashed refresh token
-	h.readStore.Set("sessions", sessionID, &readmodel.SessionReadModel{
+	_ = h.readStore.Set("sessions", sessionID, &readmodel.SessionReadModel{
 		ID:               sessionID,
 		UserID:           userID,
 		RefreshTokenHash: hashToken(refreshToken),
@@ -404,5 +404,5 @@ func (h *AuthHandlers) clearAuthCookies(w http.ResponseWriter) {
 func respondJSONError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }

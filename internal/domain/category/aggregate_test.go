@@ -166,7 +166,7 @@ func TestService_Update_Success(t *testing.T) {
 	ctx := context.Background()
 
 	categoryID := "cat-123"
-	eventStore.AddEvent(categoryID, AggregateType, EventCategoryCreated, CategoryCreated{CategoryID: categoryID})
+	_ = eventStore.AddEvent(categoryID, AggregateType, EventCategoryCreated, CategoryCreated{CategoryID: categoryID})
 
 	err := service.Update(ctx, categoryID, "Updated Name", "updated-slug", "Updated description", "parent-456", 2)
 
@@ -188,7 +188,7 @@ func TestService_Update_AutoGenerateSlug(t *testing.T) {
 	ctx := context.Background()
 
 	categoryID := "cat-123"
-	eventStore.AddEvent(categoryID, AggregateType, EventCategoryCreated, CategoryCreated{CategoryID: categoryID})
+	_ = eventStore.AddEvent(categoryID, AggregateType, EventCategoryCreated, CategoryCreated{CategoryID: categoryID})
 
 	// Empty slug should be auto-generated
 	err := service.Update(ctx, categoryID, "New Name", "", "Description", "", 1)
@@ -212,7 +212,7 @@ func TestService_Update_EmptyName(t *testing.T) {
 	ctx := context.Background()
 
 	categoryID := "cat-123"
-	eventStore.AddEvent(categoryID, AggregateType, EventCategoryCreated, CategoryCreated{CategoryID: categoryID})
+	_ = eventStore.AddEvent(categoryID, AggregateType, EventCategoryCreated, CategoryCreated{CategoryID: categoryID})
 
 	err := service.Update(ctx, categoryID, "", "slug", "Description", "", 1)
 
@@ -224,7 +224,7 @@ func TestService_Update_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 
 	categoryID := "cat-123"
-	eventStore.AddEvent(categoryID, AggregateType, EventCategoryCreated, CategoryCreated{CategoryID: categoryID})
+	_ = eventStore.AddEvent(categoryID, AggregateType, EventCategoryCreated, CategoryCreated{CategoryID: categoryID})
 
 	err := service.Update(ctx, categoryID, "Name", "Invalid Slug!", "Description", "", 1)
 
@@ -240,7 +240,7 @@ func TestService_Delete_Success(t *testing.T) {
 	ctx := context.Background()
 
 	categoryID := "cat-123"
-	eventStore.AddEvent(categoryID, AggregateType, EventCategoryCreated, CategoryCreated{CategoryID: categoryID})
+	_ = eventStore.AddEvent(categoryID, AggregateType, EventCategoryCreated, CategoryCreated{CategoryID: categoryID})
 
 	err := service.Delete(ctx, categoryID)
 

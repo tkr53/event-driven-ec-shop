@@ -212,7 +212,7 @@ func (rs *PostgresReadStore) getAllProducts() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var products []any
 	for rows.Next() {
@@ -265,7 +265,7 @@ func (rs *PostgresReadStore) getAllCarts() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var carts []any
 	for rows.Next() {
@@ -327,7 +327,7 @@ func (rs *PostgresReadStore) getAllOrders() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var orders []any
 	for rows.Next() {
@@ -380,7 +380,7 @@ func (rs *PostgresReadStore) getAllInventory() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var inventory []any
 	for rows.Next() {
@@ -445,7 +445,7 @@ func (rs *PostgresReadStore) getAllUsers() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var users []any
 	for rows.Next() {
@@ -519,7 +519,7 @@ func (rs *PostgresReadStore) getAllSessions() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var sessions []any
 	for rows.Next() {
@@ -589,7 +589,7 @@ func (rs *PostgresReadStore) getAllCategories() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var categories []any
 	for rows.Next() {
@@ -633,7 +633,7 @@ func (rs *PostgresReadStore) GetProductCategories(productID string) []string {
 		log.Printf("[PostgresReadStore] Error getting product categories: %v", err)
 		return nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var categoryIDs []string
 	for rows.Next() {
@@ -733,7 +733,7 @@ func (rs *PostgresReadStore) SearchProducts(params SearchProductsParams) []*read
 		log.Printf("[PostgresReadStore] Error searching products: %v", err)
 		return nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var products []*readmodel.ProductReadModel
 	for rows.Next() {
@@ -760,7 +760,7 @@ func (rs *PostgresReadStore) getProductCategoriesUnsafe(productID string) []stri
 	if err != nil {
 		return nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var categoryIDs []string
 	for rows.Next() {

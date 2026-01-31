@@ -160,7 +160,7 @@ func TestService_UpdateProfile_Success(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-123"
-	eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
+	_ = eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
 
 	err := service.UpdateProfile(ctx, userID, "New Name")
 
@@ -174,7 +174,7 @@ func TestService_UpdateProfile_EmptyName(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-123"
-	eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
+	_ = eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
 
 	err := service.UpdateProfile(ctx, userID, "")
 
@@ -199,7 +199,7 @@ func TestService_ChangePassword_Success(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-123"
-	eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
+	_ = eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
 
 	err := service.ChangePassword(ctx, userID, "newpassword123")
 
@@ -213,7 +213,7 @@ func TestService_ChangePassword_ShortPassword(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-123"
-	eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
+	_ = eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
 
 	err := service.ChangePassword(ctx, userID, "short")
 
@@ -271,7 +271,7 @@ func TestService_Deactivate_Success(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-123"
-	eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
+	_ = eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
 
 	err := service.Deactivate(ctx, userID)
 
@@ -294,8 +294,8 @@ func TestService_Activate_Success(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-123"
-	eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
-	eventStore.AddEvent(userID, AggregateType, EventUserDeactivated, UserDeactivated{UserID: userID})
+	_ = eventStore.AddEvent(userID, AggregateType, EventUserCreated, UserCreated{UserID: userID})
+	_ = eventStore.AddEvent(userID, AggregateType, EventUserDeactivated, UserDeactivated{UserID: userID})
 
 	err := service.Activate(ctx, userID)
 

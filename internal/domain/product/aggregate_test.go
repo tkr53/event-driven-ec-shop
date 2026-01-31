@@ -101,7 +101,7 @@ func TestService_Update_Success(t *testing.T) {
 	ctx := context.Background()
 
 	productID := "prod-123"
-	eventStore.AddEvent(productID, AggregateType, EventProductCreated, ProductCreated{ProductID: productID})
+	_ = eventStore.AddEvent(productID, AggregateType, EventProductCreated, ProductCreated{ProductID: productID})
 
 	err := service.Update(ctx, productID, "Updated Name", "Updated Description", 2000)
 
@@ -130,7 +130,7 @@ func TestService_Update_EmptyName(t *testing.T) {
 	ctx := context.Background()
 
 	productID := "prod-123"
-	eventStore.AddEvent(productID, AggregateType, EventProductCreated, ProductCreated{ProductID: productID})
+	_ = eventStore.AddEvent(productID, AggregateType, EventProductCreated, ProductCreated{ProductID: productID})
 
 	err := service.Update(ctx, productID, "", "Description", 1000)
 
@@ -142,7 +142,7 @@ func TestService_Update_ZeroPrice(t *testing.T) {
 	ctx := context.Background()
 
 	productID := "prod-123"
-	eventStore.AddEvent(productID, AggregateType, EventProductCreated, ProductCreated{ProductID: productID})
+	_ = eventStore.AddEvent(productID, AggregateType, EventProductCreated, ProductCreated{ProductID: productID})
 
 	err := service.Update(ctx, productID, "Name", "Description", 0)
 
@@ -154,7 +154,7 @@ func TestService_Update_NegativePrice(t *testing.T) {
 	ctx := context.Background()
 
 	productID := "prod-123"
-	eventStore.AddEvent(productID, AggregateType, EventProductCreated, ProductCreated{ProductID: productID})
+	_ = eventStore.AddEvent(productID, AggregateType, EventProductCreated, ProductCreated{ProductID: productID})
 
 	err := service.Update(ctx, productID, "Name", "Description", -500)
 
@@ -170,7 +170,7 @@ func TestService_Delete_Success(t *testing.T) {
 	ctx := context.Background()
 
 	productID := "prod-123"
-	eventStore.AddEvent(productID, AggregateType, EventProductCreated, ProductCreated{ProductID: productID})
+	_ = eventStore.AddEvent(productID, AggregateType, EventProductCreated, ProductCreated{ProductID: productID})
 
 	err := service.Delete(ctx, productID)
 

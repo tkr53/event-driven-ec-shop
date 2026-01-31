@@ -214,7 +214,7 @@ func (h *Handlers) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Reason string `json:"reason"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	cmd := command.CancelOrder{
 		OrderID: id,
@@ -240,7 +240,7 @@ func (h *Handlers) GetAllOrders(w http.ResponseWriter, r *http.Request) {
 func respondJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 func extractPathParam(path, prefix string) string {

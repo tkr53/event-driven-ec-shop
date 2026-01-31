@@ -91,7 +91,7 @@ func TestService_Pay_FromPending_Success(t *testing.T) {
 
 	// Create an order first
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{
 		OrderID: orderID,
 		UserID:  "user-123",
 	})
@@ -117,8 +117,8 @@ func TestService_Pay_AlreadyPaid(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
 
 	err := service.Pay(ctx, orderID)
 
@@ -130,9 +130,9 @@ func TestService_Pay_AlreadyShipped(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderShipped, OrderShipped{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderShipped, OrderShipped{OrderID: orderID})
 
 	err := service.Pay(ctx, orderID)
 
@@ -144,8 +144,8 @@ func TestService_Pay_Cancelled(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderCancelled, OrderCancelled{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderCancelled, OrderCancelled{OrderID: orderID})
 
 	err := service.Pay(ctx, orderID)
 
@@ -161,8 +161,8 @@ func TestService_Ship_FromPaid_Success(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
 
 	err := service.Ship(ctx, orderID)
 
@@ -185,7 +185,7 @@ func TestService_Ship_FromPending(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
 
 	err := service.Ship(ctx, orderID)
 
@@ -197,9 +197,9 @@ func TestService_Ship_AlreadyShipped(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderShipped, OrderShipped{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderShipped, OrderShipped{OrderID: orderID})
 
 	err := service.Ship(ctx, orderID)
 
@@ -211,8 +211,8 @@ func TestService_Ship_Cancelled(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderCancelled, OrderCancelled{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderCancelled, OrderCancelled{OrderID: orderID})
 
 	err := service.Ship(ctx, orderID)
 
@@ -228,7 +228,7 @@ func TestService_Cancel_FromPending_Success(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
 
 	err := service.Cancel(ctx, orderID, "customer request")
 
@@ -247,8 +247,8 @@ func TestService_Cancel_FromPaid_Success(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
 
 	err := service.Cancel(ctx, orderID, "refund requested")
 
@@ -271,9 +271,9 @@ func TestService_Cancel_FromShipped(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderShipped, OrderShipped{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderShipped, OrderShipped{OrderID: orderID})
 
 	err := service.Cancel(ctx, orderID, "too late")
 
@@ -285,8 +285,8 @@ func TestService_Cancel_AlreadyCancelled(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderCancelled, OrderCancelled{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderCancelled, OrderCancelled{OrderID: orderID})
 
 	err := service.Cancel(ctx, orderID, "duplicate cancel")
 
@@ -342,7 +342,7 @@ func TestRebuildStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			eventStore.Reset()
 			for _, eventType := range tt.events {
-				eventStore.AddEvent(orderID, AggregateType, eventType, struct{}{})
+				_ = eventStore.AddEvent(orderID, AggregateType, eventType, struct{}{})
 			}
 
 			events := eventStore.GetEvents(orderID)
@@ -447,7 +447,7 @@ func TestService_Pay_EventStoreError(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
 
 	// Set error for next append
 	eventStore.AppendErr = errors.New("database error")
@@ -462,8 +462,8 @@ func TestService_Ship_EventStoreError(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
 
 	eventStore.AppendErr = errors.New("database error")
 
@@ -477,7 +477,7 @@ func TestService_Cancel_EventStoreError(t *testing.T) {
 	ctx := context.Background()
 
 	orderID := "order-123"
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID})
 
 	eventStore.AppendErr = errors.New("database error")
 
@@ -626,8 +626,8 @@ func TestService_LoadOrderWithoutSnapshot(t *testing.T) {
 	orderID := "order-no-snapshot"
 
 	// Add events without snapshot
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID, UserID: "user-123"})
-	eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPlaced, OrderPlaced{OrderID: orderID, UserID: "user-123"})
+	_ = eventStore.AddEvent(orderID, AggregateType, EventOrderPaid, OrderPaid{OrderID: orderID})
 
 	// Ship the order - should work by replaying all events
 	err := service.Ship(ctx, orderID)

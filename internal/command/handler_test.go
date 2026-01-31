@@ -101,7 +101,7 @@ func TestHandler_UpdateProduct_Success(t *testing.T) {
 	ctx := context.Background()
 
 	productID := "prod-123"
-	eventStore.AddEvent(productID, product.AggregateType, product.EventProductCreated, product.ProductCreated{ProductID: productID})
+	_ = eventStore.AddEvent(productID, product.AggregateType, product.EventProductCreated, product.ProductCreated{ProductID: productID})
 
 	cmd := UpdateProduct{
 		ProductID:   productID,
@@ -142,7 +142,7 @@ func TestHandler_DeleteProduct_Success(t *testing.T) {
 	ctx := context.Background()
 
 	productID := "prod-123"
-	eventStore.AddEvent(productID, product.AggregateType, product.EventProductCreated, product.ProductCreated{ProductID: productID})
+	_ = eventStore.AddEvent(productID, product.AggregateType, product.EventProductCreated, product.ProductCreated{ProductID: productID})
 
 	cmd := DeleteProduct{ProductID: productID}
 
@@ -447,7 +447,7 @@ func TestHandler_CancelOrder_Success(t *testing.T) {
 	orderID := "order-123"
 
 	// Set up order in event store (pending state)
-	eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderPlaced, order.OrderPlaced{
+	_ = eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderPlaced, order.OrderPlaced{
 		OrderID: orderID,
 		UserID:  "user-123",
 		Items: []order.OrderItem{
@@ -510,9 +510,9 @@ func TestHandler_CancelOrder_AlreadyShipped(t *testing.T) {
 	orderID := "order-123"
 
 	// Set up order in shipped state
-	eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderPlaced, order.OrderPlaced{OrderID: orderID})
-	eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderPaid, order.OrderPaid{OrderID: orderID})
-	eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderShipped, order.OrderShipped{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderPlaced, order.OrderPlaced{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderPaid, order.OrderPaid{OrderID: orderID})
+	_ = eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderShipped, order.OrderShipped{OrderID: orderID})
 
 	readStore.SetData("orders", orderID, &query.OrderReadModel{
 		ID:     orderID,
@@ -630,7 +630,7 @@ func TestHandler_CancelOrder_MultipleItems(t *testing.T) {
 
 	orderID := "order-123"
 
-	eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderPlaced, order.OrderPlaced{
+	_ = eventStore.AddEvent(orderID, order.AggregateType, order.EventOrderPlaced, order.OrderPlaced{
 		OrderID: orderID,
 		Items: []order.OrderItem{
 			{ProductID: "prod-1", Quantity: 2},

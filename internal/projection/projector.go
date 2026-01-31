@@ -92,7 +92,7 @@ func (p *Projector) handleProductEvent(event store.Event) error {
 		if err := json.Unmarshal(event.Data, &e); err != nil {
 			return err
 		}
-		p.readStore.Delete("products", e.ProductID)
+		_ = p.readStore.Delete("products", e.ProductID)
 
 	case product.EventProductCategoryAssigned:
 		var e product.ProductCategoryAssigned
