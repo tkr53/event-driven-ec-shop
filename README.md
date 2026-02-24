@@ -321,6 +321,25 @@ event-driven-app/
 | **LocalStack** | ローカルAWSエミュレーション | Latest |
 | **Terraform** | Infrastructure as Code | >= 1.0 |
 | **Docker** | コンテナ化 | - |
+| **OpenTelemetry** | テレメトリ収集 | - |
+| **Jaeger** | 分散トレーシング | Latest |
+| **Prometheus** | メトリクス収集 | Latest |
+| **Loki** | ログ集約 | 3.4 |
+| **Promtail** | ログ収集エージェント | 3.4 |
+| **Grafana** | 可視化ダッシュボード | Latest |
+
+### Observability
+
+Traces / Metrics / Logs の 3 ピラーを統合した Observability 基盤を構築しています。
+
+| ピラー | ツール | 説明 |
+|--------|--------|------|
+| **Traces** | OpenTelemetry → Jaeger | リクエストの分散トレーシング |
+| **Metrics** | OpenTelemetry → Prometheus | HTTP、EventStore、Lambda のメトリクス |
+| **Logs** | slog (JSON) → Promtail → Loki | 構造化ログの集約 |
+
+- **trace_id 相関**: ログに trace_id/span_id が自動付与され、Grafana 上でログ↔トレースの双方向リンクが可能
+- **Grafana ダッシュボード**: EC App Overview ダッシュボードで HTTP Traffic / EventStore / Lambda / Logs を一覧
 
 ### データベース設計
 
@@ -423,6 +442,10 @@ make logs
 | **LocalStack** | http://localhost:4566 | AWS サービスエミュレーション |
 | **Mailpit** | http://localhost:8025 | 開発用メールサーバ（受信メール確認） |
 | **PostgreSQL** | localhost:5432 | Read DB（読み取りモデル） |
+| **Jaeger** | http://localhost:16686 | 分散トレーシング UI |
+| **Prometheus** | http://localhost:9090 | メトリクス収集 |
+| **Grafana** | http://localhost:3001 | ダッシュボード（admin/admin） |
+| **Loki** | http://localhost:3100 | ログ集約 |
 
 ### 初期管理者アカウント
 
@@ -443,11 +466,10 @@ make kinesis-status
 # Lambda 関数一覧
 make lambda-list
 
-# Lambda Projector ログ
-make logs-projector
-
-# Lambda Notifier ログ
-make logs-notifier
+# ログ確認
+make logs-projector  # Lambda Projector ログ
+make logs-notifier   # Lambda Notifier ログ
+make logs-loki       # Loki + Promtail ログ
 ```
 
 ### 停止・クリーンアップ

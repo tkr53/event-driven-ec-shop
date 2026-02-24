@@ -1,5 +1,5 @@
 .PHONY: up down build api logs clean test test-coverage test-race \
-        build-lambda deploy-local logs-projector logs-notifier
+        build-lambda deploy-local logs-projector logs-notifier logs-loki
 
 # 全サービス起動（コンテナ）
 up:
@@ -9,9 +9,9 @@ up:
 down:
 	docker-compose down
 
-# インフラのみ起動（LocalStack + PostgreSQL + Mailpit）
+# インフラのみ起動（LocalStack + PostgreSQL + Mailpit + Observability）
 infra:
-	docker-compose up -d localstack postgres mailpit
+	docker-compose up -d localstack postgres mailpit jaeger otel-collector prometheus loki promtail grafana
 
 # ビルドのみ
 build:
@@ -61,6 +61,10 @@ logs-projector:
 		awslocal logs tail /aws/lambda/ec-projector --follow --region ap-northeast-1 2>/dev/null || \
 		aws --endpoint-url=http://localhost:4566 logs tail /aws/lambda/ec-projector --follow --region ap-northeast-1 2>/dev/null || \
 		echo "No logs yet. Make sure LocalStack is running and Lambda has been invoked."
+
+# Loki ログ（Promtail → Loki）
+logs-loki:
+	docker-compose logs -f loki promtail
 
 # Lambda Notifier のCloudWatchログを表示
 logs-notifier:

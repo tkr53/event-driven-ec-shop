@@ -24,6 +24,7 @@ make api
 make logs
 make logs-projector  # Lambda Projector logs
 make logs-notifier   # Lambda Notifier logs
+make logs-loki       # Loki + Promtail logs
 
 # Clean up (removes volumes/data)
 make clean
@@ -100,6 +101,10 @@ When a command is executed:
 | API | http://localhost:8080 |
 | LocalStack | http://localhost:4566 |
 | Mailpit (email) | http://localhost:8025 |
+| Jaeger (traces) | http://localhost:16686 |
+| Prometheus (metrics) | http://localhost:9090 |
+| Grafana (dashboards) | http://localhost:3001 (admin/admin) |
+| Loki (logs) | http://localhost:3100 |
 
 ## Admin Access
 
