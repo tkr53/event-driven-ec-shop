@@ -3,7 +3,7 @@ package notification
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 
 	"github.com/example/ec-event-driven/internal/domain/order"
 	"github.com/example/ec-event-driven/internal/email"
@@ -25,52 +25,51 @@ func NewHandler(emailSvc *email.Service, readStore store.ReadStoreInterface) *Ha
 	}
 }
 
-// HandleEvent processes an event from Kafka
+// HandleEvent processes an event from Kinesis
 func (h *Handler) HandleEvent(ctx context.Context, key, value []byte) error {
 	var event store.Event
 	if err := json.Unmarshal(value, &event); err != nil {
-		log.Printf("[Notifier] Failed to unmarshal event: %v", err)
+		slog.ErrorContext(ctx, "failed to unmarshal event", "error", err)
 		return err
 	}
 
 	// Only process OrderPlaced events
 	if event.EventType == order.EventOrderPlaced {
-		return h.handleOrderPlaced(event)
+		return h.handleOrderPlaced(ctx, event)
 	}
 
 	return nil
 }
 
-func (h *Handler) handleOrderPlaced(event store.Event) error {
+func (h *Handler) handleOrderPlaced(ctx context.Context, event store.Event) error {
 	var e order.OrderPlaced
 	if err := json.Unmarshal(event.Data, &e); err != nil {
-		log.Printf("[Notifier] Failed to unmarshal OrderPlaced event: %v", err)
+		slog.ErrorContext(ctx, "failed to unmarshal OrderPlaced event", "error", err)
 		return err
 	}
 
-	log.Printf("[Notifier] Processing OrderPlaced event for order %s, user %s", e.OrderID, e.UserID)
+	slog.InfoContext(ctx, "processing OrderPlaced event", "order_id", e.OrderID, "user_id", e.UserID)
 
 	// Get user information from read store
 	userData, exists, err := h.readStore.Get("users", e.UserID)
 	if err != nil {
-		log.Printf("[Notifier] Error getting user %s: %v", e.UserID, err)
+		slog.ErrorContext(ctx, "failed to get user", "user_id", e.UserID, "error", err)
 		return nil
 	}
 	if !exists {
-		log.Printf("[Notifier] User not found: %s", e.UserID)
+		slog.WarnContext(ctx, "user not found", "user_id", e.UserID)
 		return nil
 	}
 
 	user, ok := userData.(*readmodel.UserReadModel)
 	if !ok {
-		log.Printf("[Notifier] Invalid user data type for user: %s", e.UserID)
+		slog.WarnContext(ctx, "invalid user data type", "user_id", e.UserID)
 		return nil
 	}
 
 	// Convert order items to email items
 	emailItems := make([]email.OrderItem, len(e.Items))
 	for i, item := range e.Items {
-		// Try to get product name from read store
 		productName := item.ProductID
 		if productData, exists, _ := h.readStore.Get("products", item.ProductID); exists {
 			if product, ok := productData.(*readmodel.ProductReadModel); ok {
@@ -88,10 +87,10 @@ func (h *Handler) handleOrderPlaced(event store.Event) error {
 
 	// Send order confirmation email
 	if err := h.emailService.SendOrderConfirmation(user.Email, e.OrderID, e.Total, emailItems); err != nil {
-		log.Printf("[Notifier] Failed to send email to %s: %v", user.Email, err)
+		slog.ErrorContext(ctx, "failed to send email", "email", user.Email, "error", err)
 		return err
 	}
 
-	log.Printf("[Notifier] Order confirmation email sent to %s for order %s", user.Email, e.OrderID)
+	slog.InfoContext(ctx, "order confirmation email sent", "email", user.Email, "order_id", e.OrderID)
 	return nil
 }

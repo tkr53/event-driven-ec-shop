@@ -3,7 +3,7 @@ package command
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/example/ec-event-driven/internal/domain/cart"
 	"github.com/example/ec-event-driven/internal/domain/inventory"
@@ -11,7 +11,10 @@ import (
 	"github.com/example/ec-event-driven/internal/domain/product"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/readmodel"
+	"go.opentelemetry.io/otel"
 )
+
+var cmdTracer = otel.Tracer("ec-event-driven/command")
 
 type Handler struct {
 	productSvc   *product.Service
@@ -37,8 +40,10 @@ func NewHandler(
 	}
 }
 
-// CreateProduct creates a new product (async projection - updates via Kafka)
+// CreateProduct creates a new product (async projection)
 func (h *Handler) CreateProduct(ctx context.Context, cmd CreateProduct) (*product.Product, error) {
+	ctx, span := cmdTracer.Start(ctx, "command.CreateProduct")
+	defer span.End()
 	// 1. Create product (emits ProductCreated event)
 	p, err := h.productSvc.Create(ctx, cmd.Name, cmd.Description, cmd.Price, cmd.Stock)
 	if err != nil {
@@ -56,20 +61,27 @@ func (h *Handler) CreateProduct(ctx context.Context, cmd CreateProduct) (*produc
 
 // UpdateProduct updates a product
 func (h *Handler) UpdateProduct(ctx context.Context, cmd UpdateProduct) error {
+	ctx, span := cmdTracer.Start(ctx, "command.UpdateProduct")
+	defer span.End()
 	return h.productSvc.Update(ctx, cmd.ProductID, cmd.Name, cmd.Description, cmd.Price)
 }
 
 // DeleteProduct deletes a product
 func (h *Handler) DeleteProduct(ctx context.Context, cmd DeleteProduct) error {
+	ctx, span := cmdTracer.Start(ctx, "command.DeleteProduct")
+	defer span.End()
 	return h.productSvc.Delete(ctx, cmd.ProductID)
 }
 
 // AddToCart adds an item to cart
 func (h *Handler) AddToCart(ctx context.Context, cmd AddToCart) error {
+	ctx, span := cmdTracer.Start(ctx, "command.AddToCart")
+	defer span.End()
+
 	// Get product price from read store
 	p, ok, err := h.readStore.Get("products", cmd.ProductID)
 	if err != nil {
-		log.Printf("[Command] Error getting product %s: %v", cmd.ProductID, err)
+		slog.ErrorContext(ctx, "failed to get product", "product_id", cmd.ProductID, "error", err)
 		return product.ErrProductNotFound
 	}
 	if !ok {
@@ -83,6 +95,8 @@ func (h *Handler) AddToCart(ctx context.Context, cmd AddToCart) error {
 
 // RemoveFromCart removes an item from cart
 func (h *Handler) RemoveFromCart(ctx context.Context, cmd RemoveFromCart) error {
+	ctx, span := cmdTracer.Start(ctx, "command.RemoveFromCart")
+	defer span.End()
 	return h.cartSvc.RemoveItem(ctx, cmd.UserID, cmd.ProductID)
 }
 
@@ -93,11 +107,14 @@ func (h *Handler) ClearCart(ctx context.Context, cmd ClearCart) error {
 
 // PlaceOrder creates an order from cart with stock validation and compensating transactions
 func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order, error) {
+	ctx, span := cmdTracer.Start(ctx, "command.PlaceOrder")
+	defer span.End()
+
 	// Get cart from read store
 	cartID := cart.GetCartID(cmd.UserID)
 	c, ok, err := h.readStore.Get("carts", cartID)
 	if err != nil {
-		log.Printf("[Command] Error getting cart %s: %v", cartID, err)
+		slog.ErrorContext(ctx, "failed to get cart", "cart_id", cartID, "error", err)
 		return nil, order.ErrEmptyOrder
 	}
 	if !ok || len(c.(*readmodel.CartReadModel).Items) == 0 {
@@ -120,7 +137,7 @@ func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order,
 	for _, item := range items {
 		inv, ok, err := h.readStore.Get("inventory", item.ProductID)
 		if err != nil {
-			log.Printf("[Command] Error getting inventory for product %s: %v", item.ProductID, err)
+			slog.ErrorContext(ctx, "failed to get inventory", "product_id", item.ProductID, "error", err)
 			return nil, fmt.Errorf("inventory not found for product %s", item.ProductID)
 		}
 		if !ok {
@@ -147,12 +164,12 @@ func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order,
 			// Compensating transaction: release already reserved inventory
 			for _, reserved := range reservedItems {
 				if releaseErr := h.inventorySvc.Release(ctx, reserved.ProductID, o.ID, reserved.Quantity); releaseErr != nil {
-					log.Printf("[PlaceOrder] Failed to release inventory for product %s: %v", reserved.ProductID, releaseErr)
+					slog.ErrorContext(ctx, "failed to release inventory during compensation", "product_id", reserved.ProductID, "error", releaseErr)
 				}
 			}
 			// Cancel the order
 			if cancelErr := h.orderSvc.Cancel(ctx, o.ID, "inventory reservation failed"); cancelErr != nil {
-				log.Printf("[PlaceOrder] Failed to cancel order %s: %v", o.ID, cancelErr)
+				slog.ErrorContext(ctx, "failed to cancel order during compensation", "order_id", o.ID, "error", cancelErr)
 			}
 			return nil, fmt.Errorf("failed to reserve inventory for product %s: %w", item.ProductID, err)
 		}
@@ -162,7 +179,7 @@ func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order,
 	// Clear cart (emits CartCleared event)
 	// This is not critical - if it fails, user can manually clear
 	if err := h.cartSvc.Clear(ctx, cmd.UserID); err != nil {
-		log.Printf("[PlaceOrder] Failed to clear cart for user %s: %v", cmd.UserID, err)
+		slog.WarnContext(ctx, "failed to clear cart after order", "user_id", cmd.UserID, "error", err)
 	}
 
 	return o, nil
@@ -170,6 +187,9 @@ func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order,
 
 // PayOrder confirms payment and deducts reserved inventory
 func (h *Handler) PayOrder(ctx context.Context, cmd PayOrder) error {
+	ctx, span := cmdTracer.Start(ctx, "command.PayOrder")
+	defer span.End()
+
 	// Load order from event store (write side), not read store
 	o, err := h.orderSvc.Get(ctx, cmd.OrderID)
 	if err != nil {
@@ -188,15 +208,20 @@ func (h *Handler) PayOrder(ctx context.Context, cmd PayOrder) error {
 
 // ShipOrder marks an order as shipped
 func (h *Handler) ShipOrder(ctx context.Context, cmd ShipOrder) error {
+	ctx, span := cmdTracer.Start(ctx, "command.ShipOrder")
+	defer span.End()
 	return h.orderSvc.Ship(ctx, cmd.OrderID)
 }
 
 // CancelOrder cancels an order
 func (h *Handler) CancelOrder(ctx context.Context, cmd CancelOrder) error {
+	ctx, span := cmdTracer.Start(ctx, "command.CancelOrder")
+	defer span.End()
+
 	// Get order from read store to release inventory
 	o, ok, err := h.readStore.Get("orders", cmd.OrderID)
 	if err != nil {
-		log.Printf("[Command] Error getting order %s: %v", cmd.OrderID, err)
+		slog.ErrorContext(ctx, "failed to get order", "order_id", cmd.OrderID, "error", err)
 		return order.ErrOrderNotFound
 	}
 	if !ok {

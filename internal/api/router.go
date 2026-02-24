@@ -1,7 +1,7 @@
 package api
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -28,7 +28,7 @@ func init() {
 			allowedOrigins[origin] = true
 		}
 	}
-	log.Printf("[API] CORS allowed origins: %v", allowedOrigins)
+	slog.Info("CORS allowed origins configured", "origins", allowedOrigins)
 }
 
 // RouterConfig holds the configuration for the router
@@ -282,14 +282,7 @@ func NewRouter(config RouterConfig) http.Handler {
 		),
 	))
 
-	return withCORS(withBodyLimit(withLogging(mux)))
-}
-
-func withLogging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("[API] %s %s", r.Method, r.URL.Path)
-		next.ServeHTTP(w, r)
-	})
+	return withCORS(withBodyLimit(middleware.TracingMiddleware(mux)))
 }
 
 // withBodyLimit limits the request body size to prevent memory exhaustion attacks

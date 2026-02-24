@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,6 +22,7 @@ import (
 	"github.com/example/ec-event-driven/internal/domain/product"
 	"github.com/example/ec-event-driven/internal/domain/user"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
+	"github.com/example/ec-event-driven/internal/observability"
 	"github.com/example/ec-event-driven/internal/query"
 )
 
@@ -29,14 +30,47 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Initialize structured logging
+	observability.InitLogger("ec-api")
+
+	// Initialize OpenTelemetry tracer
+	tracerShutdown, err := observability.InitTracer(ctx, observability.TracerConfig{
+		ServiceName: "ec-api",
+	})
+	if err != nil {
+		slog.Error("failed to initialize tracer", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := tracerShutdown(ctx); err != nil {
+			slog.Error("failed to shutdown tracer", "error", err)
+		}
+	}()
+
+	// Initialize OpenTelemetry meter
+	meterShutdown, err := observability.InitMeter(ctx, observability.MeterConfig{
+		ServiceName: "ec-api",
+	})
+	if err != nil {
+		slog.Error("failed to initialize meter", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := meterShutdown(ctx); err != nil {
+			slog.Error("failed to shutdown meter", "error", err)
+		}
+	}()
+
 	// Configuration from environment variables
 	postgresConnStr := getEnv("DATABASE_URL", "postgres://ecapp:ecapp@localhost:5432/ecapp?sslmode=disable")
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
-		log.Fatal("[API] JWT_SECRET environment variable is required")
+		slog.Error("JWT_SECRET environment variable is required")
+		os.Exit(1)
 	}
 	if len(jwtSecret) < 32 {
-		log.Fatal("[API] JWT_SECRET must be at least 32 characters long")
+		slog.Error("JWT_SECRET must be at least 32 characters long")
+		os.Exit(1)
 	}
 
 	// DynamoDB configuration
@@ -45,38 +79,38 @@ func main() {
 	dynamoRegion := getEnv("DYNAMODB_REGION", "ap-northeast-1")
 	dynamoEndpoint := os.Getenv("DYNAMODB_ENDPOINT")
 
-	log.Println("[API] ========================================")
-	log.Println("[API] EC Shop - CQRS Mode (Kinesis)")
-	log.Println("[API] ========================================")
-	log.Println("[API] Write DB: DynamoDB (events table)")
-	log.Println("[API] Read DB:  PostgreSQL (read_* tables)")
-	log.Println("[API] Events:   DynamoDB → Kinesis → Lambda")
+	slog.Info("EC Shop - CQRS Mode (Kinesis)",
+		"write_db", "DynamoDB",
+		"read_db", "PostgreSQL",
+		"events", "DynamoDB → Kinesis → Lambda",
+	)
 
 	// Initialize DynamoDB client
 	dynamoClient, err := newDynamoDBClient(ctx, dynamoRegion, dynamoEndpoint)
 	if err != nil {
-		log.Fatalf("[API] Failed to create DynamoDB client: %v", err)
+		slog.Error("failed to create DynamoDB client", "error", err)
+		os.Exit(1)
 	}
 
 	// Initialize DynamoDB EventStore
-	// Events are automatically streamed to Kinesis via DynamoDB Kinesis integration
 	eventStore := store.NewDynamoEventStore(dynamoClient, dynamoTableName, dynamoSnapshotTableName)
-	log.Printf("[API] Event Store: DynamoDB (events: %s, snapshots: %s)", dynamoTableName, dynamoSnapshotTableName)
+	slog.Info("event store initialized", "events_table", dynamoTableName, "snapshots_table", dynamoSnapshotTableName)
 
 	// Initialize PostgreSQL connection for read store
 	db, err := store.ConnectPostgres(postgresConnStr)
 	if err != nil {
-		log.Fatalf("[API] Failed to connect to PostgreSQL: %v", err)
+		slog.Error("failed to connect to PostgreSQL", "error", err)
+		os.Exit(1)
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			log.Printf("[API] Error closing database: %v", err)
+			slog.Error("error closing database", "error", err)
 		}
 	}()
-	log.Println("[API] Connected to PostgreSQL (read store)")
+	slog.Info("connected to PostgreSQL read store")
 
 	// Initialize read store
-	readStore := store.NewPostgresReadStore(db) // Use PostgreSQL for read models
+	readStore := store.NewPostgresReadStore(db)
 
 	// Initialize domain services
 	productSvc := product.NewService(eventStore)
@@ -89,17 +123,15 @@ func main() {
 	// Initialize JWT service
 	jwtService := auth.NewJWTService(
 		jwtSecret,
-		15*time.Minute,  // Access token expiry
-		7*24*time.Hour,  // Refresh token expiry (7 days)
+		15*time.Minute,
+		7*24*time.Hour,
 	)
 
 	// Initialize handlers
 	cmdHandler := command.NewHandler(productSvc, cartSvc, orderSvc, inventorySvc, readStore)
 	queryHandler := query.NewHandler(readStore)
 
-	// Note: Read model updates are handled by Lambda Projector via Kinesis
-	// The API only writes events to DynamoDB; streaming to Kinesis is automatic
-	log.Println("[API] Read model updates delegated to Lambda Projector (via Kinesis)")
+	slog.Info("read model updates delegated to Lambda Projector via Kinesis")
 
 	// Initialize API
 	handlers := api.NewHandlers(cmdHandler, queryHandler)
@@ -119,14 +151,10 @@ func main() {
 	}
 
 	go func() {
-		log.Println("[API] ========================================")
-		log.Println("[API] Server started on :8080")
-		log.Println("[API] ========================================")
-		log.Println("[API] Note: Using ASYNC projection")
-		log.Println("[API] Read model updates may have slight delay")
-		log.Println("[API] ========================================")
+		slog.Info("server started", "addr", ":8080", "mode", "async_projection")
 		if err := server.ListenAndServe(); err != http.ErrServerClosed {
-			log.Fatalf("[API] Server error: %v", err)
+			slog.Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -135,13 +163,13 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
-	log.Println("[API] Shutting down...")
+	slog.Info("shutting down...")
 	cancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("[API] Error shutting down server: %v", err)
+		slog.Error("error shutting down server", "error", err)
 	}
 }
 
@@ -158,7 +186,6 @@ func newDynamoDBClient(ctx context.Context, region, endpoint string) (*dynamodb.
 	var err error
 
 	if endpoint != "" {
-		// Local development with DynamoDB Local
 		cfg, err = config.LoadDefaultConfig(ctx, config.WithRegion(region))
 		if err != nil {
 			return nil, err
@@ -168,7 +195,6 @@ func newDynamoDBClient(ctx context.Context, region, endpoint string) (*dynamodb.
 		}), nil
 	}
 
-	// Production AWS
 	cfg, err = config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
 		return nil, err

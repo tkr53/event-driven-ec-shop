@@ -1,12 +1,15 @@
 package query
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/infrastructure/store/mocks"
 	"github.com/stretchr/testify/assert"
 )
+
+var ctx = context.Background()
 
 func newTestQueryHandler() (*Handler, *mocks.MockReadStore) {
 	readStore := mocks.NewMockReadStore()
@@ -31,7 +34,7 @@ func TestHandler_GetProduct_Found(t *testing.T) {
 	}
 	readStore.SetData("products", "prod-123", expectedProduct)
 
-	product, found := handler.GetProduct("prod-123")
+	product, found := handler.GetProduct(ctx, "prod-123")
 
 	assert.True(t, found)
 	assert.Equal(t, expectedProduct.ID, product.ID)
@@ -42,7 +45,7 @@ func TestHandler_GetProduct_Found(t *testing.T) {
 func TestHandler_GetProduct_NotFound(t *testing.T) {
 	handler, _ := newTestQueryHandler()
 
-	product, found := handler.GetProduct("non-existent")
+	product, found := handler.GetProduct(ctx, "non-existent")
 
 	assert.False(t, found)
 	assert.Nil(t, product)
@@ -55,7 +58,7 @@ func TestHandler_ListProducts_WithProducts(t *testing.T) {
 	readStore.SetData("products", "prod-2", &ProductReadModel{ID: "prod-2", Name: "Product 2"})
 	readStore.SetData("products", "prod-3", &ProductReadModel{ID: "prod-3", Name: "Product 3"})
 
-	products := handler.ListProducts()
+	products := handler.ListProducts(ctx)
 
 	assert.Len(t, products, 3)
 }
@@ -63,7 +66,7 @@ func TestHandler_ListProducts_WithProducts(t *testing.T) {
 func TestHandler_ListProducts_Empty(t *testing.T) {
 	handler, _ := newTestQueryHandler()
 
-	products := handler.ListProducts()
+	products := handler.ListProducts(ctx)
 
 	assert.Empty(t, products)
 }
@@ -85,7 +88,7 @@ func TestHandler_GetCart_Found(t *testing.T) {
 	}
 	readStore.SetData("carts", "cart-user-123", expectedCart)
 
-	cart, found := handler.GetCart("user-123")
+	cart, found := handler.GetCart(ctx, "user-123")
 
 	assert.True(t, found)
 	assert.Equal(t, expectedCart.ID, cart.ID)
@@ -97,7 +100,7 @@ func TestHandler_GetCart_Found(t *testing.T) {
 func TestHandler_GetCart_NotFound_ReturnsEmptyCart(t *testing.T) {
 	handler, _ := newTestQueryHandler()
 
-	cart, found := handler.GetCart("user-with-no-cart")
+	cart, found := handler.GetCart(ctx, "user-with-no-cart")
 
 	// GetCart returns an empty cart when not found
 	assert.True(t, found)
@@ -126,7 +129,7 @@ func TestHandler_GetOrder_Found(t *testing.T) {
 	}
 	readStore.SetData("orders", "order-123", expectedOrder)
 
-	order, found := handler.GetOrder("order-123")
+	order, found := handler.GetOrder(ctx, "order-123")
 
 	assert.True(t, found)
 	assert.Equal(t, expectedOrder.ID, order.ID)
@@ -136,7 +139,7 @@ func TestHandler_GetOrder_Found(t *testing.T) {
 func TestHandler_GetOrder_NotFound(t *testing.T) {
 	handler, _ := newTestQueryHandler()
 
-	order, found := handler.GetOrder("non-existent")
+	order, found := handler.GetOrder(ctx, "non-existent")
 
 	assert.False(t, found)
 	assert.Nil(t, order)
@@ -149,7 +152,7 @@ func TestHandler_ListOrdersByUser_WithOrders(t *testing.T) {
 	readStore.SetData("orders", "order-2", &OrderReadModel{ID: "order-2", UserID: "user-123"})
 	readStore.SetData("orders", "order-3", &OrderReadModel{ID: "order-3", UserID: "user-456"})
 
-	orders := handler.ListOrdersByUser("user-123")
+	orders := handler.ListOrdersByUser(ctx, "user-123")
 
 	assert.Len(t, orders, 2)
 	for _, order := range orders {
@@ -160,7 +163,7 @@ func TestHandler_ListOrdersByUser_WithOrders(t *testing.T) {
 func TestHandler_ListOrdersByUser_NoOrders(t *testing.T) {
 	handler, _ := newTestQueryHandler()
 
-	orders := handler.ListOrdersByUser("user-with-no-orders")
+	orders := handler.ListOrdersByUser(ctx, "user-with-no-orders")
 
 	assert.Empty(t, orders)
 }
@@ -171,7 +174,7 @@ func TestHandler_ListAllOrders_WithOrders(t *testing.T) {
 	readStore.SetData("orders", "order-1", &OrderReadModel{ID: "order-1", UserID: "user-123"})
 	readStore.SetData("orders", "order-2", &OrderReadModel{ID: "order-2", UserID: "user-456"})
 
-	orders := handler.ListAllOrders()
+	orders := handler.ListAllOrders(ctx)
 
 	assert.Len(t, orders, 2)
 }
@@ -179,7 +182,7 @@ func TestHandler_ListAllOrders_WithOrders(t *testing.T) {
 func TestHandler_ListAllOrders_Empty(t *testing.T) {
 	handler, _ := newTestQueryHandler()
 
-	orders := handler.ListAllOrders()
+	orders := handler.ListAllOrders(ctx)
 
 	assert.Empty(t, orders)
 }
@@ -199,7 +202,7 @@ func TestHandler_GetInventory_Found(t *testing.T) {
 	}
 	readStore.SetData("inventory", "prod-123", expectedInventory)
 
-	inventory, found := handler.GetInventory("prod-123")
+	inventory, found := handler.GetInventory(ctx, "prod-123")
 
 	assert.True(t, found)
 	assert.Equal(t, expectedInventory.ProductID, inventory.ProductID)
@@ -210,7 +213,7 @@ func TestHandler_GetInventory_Found(t *testing.T) {
 func TestHandler_GetInventory_NotFound(t *testing.T) {
 	handler, _ := newTestQueryHandler()
 
-	inventory, found := handler.GetInventory("non-existent")
+	inventory, found := handler.GetInventory(ctx, "non-existent")
 
 	assert.False(t, found)
 	assert.Nil(t, inventory)
@@ -223,7 +226,6 @@ func TestHandler_GetInventory_NotFound(t *testing.T) {
 func TestCartTotal(t *testing.T) {
 	handler, readStore := newTestQueryHandler()
 
-	// The cart ID should match the format "cart-{userID}"
 	cart := &CartReadModel{
 		ID:     "cart-user-123",
 		UserID: "user-123",
@@ -236,7 +238,7 @@ func TestCartTotal(t *testing.T) {
 	}
 	readStore.SetData("carts", "cart-user-123", cart)
 
-	result, found := handler.GetCart("user-123")
+	result, found := handler.GetCart(ctx, "user-123")
 
 	assert.True(t, found)
 	assert.Equal(t, 5500, result.Total)

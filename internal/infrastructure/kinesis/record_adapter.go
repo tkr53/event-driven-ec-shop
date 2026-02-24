@@ -75,6 +75,10 @@ func convertDynamoDBImage(image map[string]events.DynamoDBAttributeValue) (*stor
 		event.Version = int(version)
 	}
 
+	if v, ok := image["trace_parent"]; ok {
+		event.TraceParent = v.String()
+	}
+
 	// Validate required fields
 	if event.ID == "" || event.AggregateID == "" || event.EventType == "" {
 		return nil, fmt.Errorf("missing required fields: id=%s, aggregate_id=%s, event_type=%s",

@@ -1,7 +1,8 @@
 package query
 
 import (
-	"log"
+	"context"
+	"log/slog"
 
 	"github.com/example/ec-event-driven/internal/domain/cart"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
@@ -16,10 +17,10 @@ func NewHandler(readStore store.ReadStoreInterface) *Handler {
 }
 
 // Products
-func (h *Handler) GetProduct(id string) (*ProductReadModel, bool) {
+func (h *Handler) GetProduct(ctx context.Context, id string) (*ProductReadModel, bool) {
 	data, ok, err := h.readStore.Get("products", id)
 	if err != nil {
-		log.Printf("[Query] Error getting product %s: %v", id, err)
+		slog.ErrorContext(ctx, "failed to get product", "product_id", id, "error", err)
 		return nil, false
 	}
 	if !ok {
@@ -28,10 +29,10 @@ func (h *Handler) GetProduct(id string) (*ProductReadModel, bool) {
 	return data.(*ProductReadModel), true
 }
 
-func (h *Handler) ListProducts() []*ProductReadModel {
+func (h *Handler) ListProducts(ctx context.Context) []*ProductReadModel {
 	items, err := h.readStore.GetAll("products")
 	if err != nil {
-		log.Printf("[Query] Error listing products: %v", err)
+		slog.ErrorContext(ctx, "failed to list products", "error", err)
 		return nil
 	}
 	products := make([]*ProductReadModel, 0, len(items))
@@ -42,11 +43,11 @@ func (h *Handler) ListProducts() []*ProductReadModel {
 }
 
 // Cart
-func (h *Handler) GetCart(userID string) (*CartReadModel, bool) {
+func (h *Handler) GetCart(ctx context.Context, userID string) (*CartReadModel, bool) {
 	cartID := cart.GetCartID(userID)
 	data, ok, err := h.readStore.Get("carts", cartID)
 	if err != nil {
-		log.Printf("[Query] Error getting cart %s: %v", cartID, err)
+		slog.ErrorContext(ctx, "failed to get cart", "cart_id", cartID, "error", err)
 		return nil, false
 	}
 	if !ok {
@@ -62,10 +63,10 @@ func (h *Handler) GetCart(userID string) (*CartReadModel, bool) {
 }
 
 // Orders
-func (h *Handler) GetOrder(id string) (*OrderReadModel, bool) {
+func (h *Handler) GetOrder(ctx context.Context, id string) (*OrderReadModel, bool) {
 	data, ok, err := h.readStore.Get("orders", id)
 	if err != nil {
-		log.Printf("[Query] Error getting order %s: %v", id, err)
+		slog.ErrorContext(ctx, "failed to get order", "order_id", id, "error", err)
 		return nil, false
 	}
 	if !ok {
@@ -74,10 +75,10 @@ func (h *Handler) GetOrder(id string) (*OrderReadModel, bool) {
 	return data.(*OrderReadModel), true
 }
 
-func (h *Handler) ListOrdersByUser(userID string) []*OrderReadModel {
+func (h *Handler) ListOrdersByUser(ctx context.Context, userID string) []*OrderReadModel {
 	items, err := h.readStore.GetAll("orders")
 	if err != nil {
-		log.Printf("[Query] Error listing orders: %v", err)
+		slog.ErrorContext(ctx, "failed to list orders", "error", err)
 		return nil
 	}
 	orders := make([]*OrderReadModel, 0)
@@ -91,10 +92,10 @@ func (h *Handler) ListOrdersByUser(userID string) []*OrderReadModel {
 }
 
 // ListAllOrders returns all orders (for admin use)
-func (h *Handler) ListAllOrders() []*OrderReadModel {
+func (h *Handler) ListAllOrders(ctx context.Context) []*OrderReadModel {
 	items, err := h.readStore.GetAll("orders")
 	if err != nil {
-		log.Printf("[Query] Error listing all orders: %v", err)
+		slog.ErrorContext(ctx, "failed to list all orders", "error", err)
 		return nil
 	}
 	orders := make([]*OrderReadModel, 0, len(items))
@@ -105,10 +106,10 @@ func (h *Handler) ListAllOrders() []*OrderReadModel {
 }
 
 // Inventory
-func (h *Handler) GetInventory(productID string) (*InventoryReadModel, bool) {
+func (h *Handler) GetInventory(ctx context.Context, productID string) (*InventoryReadModel, bool) {
 	data, ok, err := h.readStore.Get("inventory", productID)
 	if err != nil {
-		log.Printf("[Query] Error getting inventory %s: %v", productID, err)
+		slog.ErrorContext(ctx, "failed to get inventory", "product_id", productID, "error", err)
 		return nil, false
 	}
 	if !ok {

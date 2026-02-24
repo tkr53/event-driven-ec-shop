@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/domain/aggregate"
@@ -127,7 +127,7 @@ func (s *Service) AddStock(ctx context.Context, productID string, quantity int) 
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, inv, AggregateType); err != nil {
-		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "product_id", inv.ProductID, "error", err)
 	}
 
 	return nil
@@ -164,7 +164,7 @@ func (s *Service) Reserve(ctx context.Context, productID, orderID string, quanti
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, inv, AggregateType); err != nil {
-		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "product_id", inv.ProductID, "error", err)
 	}
 
 	return nil
@@ -204,7 +204,7 @@ func (s *Service) Release(ctx context.Context, productID, orderID string, quanti
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, inv, AggregateType); err != nil {
-		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "product_id", inv.ProductID, "error", err)
 	}
 
 	return nil
@@ -248,7 +248,7 @@ func (s *Service) Deduct(ctx context.Context, productID, orderID string, quantit
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, inv, AggregateType); err != nil {
-		log.Printf("[Inventory] Failed to create snapshot for product %s: %v", inv.ProductID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "product_id", inv.ProductID, "error", err)
 	}
 
 	return nil

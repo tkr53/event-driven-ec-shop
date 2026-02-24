@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/domain/aggregate"
@@ -219,7 +219,7 @@ func (s *Service) Place(ctx context.Context, userID string, items []OrderItem) (
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, order, AggregateType); err != nil {
-		log.Printf("[Order] Failed to create snapshot for order %s: %v", order.ID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "order_id", order.ID, "error", err)
 	}
 
 	return order, nil
@@ -253,7 +253,7 @@ func (s *Service) Pay(ctx context.Context, orderID string) error {
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, order, AggregateType); err != nil {
-		log.Printf("[Order] Failed to create snapshot for order %s: %v", order.ID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "order_id", order.ID, "error", err)
 	}
 
 	return nil
@@ -287,7 +287,7 @@ func (s *Service) Ship(ctx context.Context, orderID string) error {
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, order, AggregateType); err != nil {
-		log.Printf("[Order] Failed to create snapshot for order %s: %v", order.ID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "order_id", order.ID, "error", err)
 	}
 
 	return nil
@@ -322,7 +322,7 @@ func (s *Service) Cancel(ctx context.Context, orderID, reason string) error {
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, order, AggregateType); err != nil {
-		log.Printf("[Order] Failed to create snapshot for order %s: %v", order.ID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "order_id", order.ID, "error", err)
 	}
 
 	return nil

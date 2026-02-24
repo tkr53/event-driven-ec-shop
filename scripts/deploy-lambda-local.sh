@@ -40,7 +40,7 @@ $AWS_CMD lambda create-function \
   --architectures arm64 \
   --role "${ROLE_ARN}" \
   --zip-file fileb://projector.zip \
-  --environment "Variables={DATABASE_URL=postgres://ecapp:ecapp@host.docker.internal:5432/ecapp?sslmode=disable}" \
+  --environment "Variables={DATABASE_URL=postgres://ecapp:ecapp@postgres:5432/ecapp?sslmode=disable,OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317,OTEL_SERVICE_NAME=ec-projector}" \
   --region "${AWS_REGION}" 2>/dev/null || \
 $AWS_CMD lambda update-function-code \
   --function-name ec-projector \
@@ -59,7 +59,7 @@ $AWS_CMD lambda create-function \
   --architectures arm64 \
   --role "${ROLE_ARN}" \
   --zip-file fileb://notifier.zip \
-  --environment "Variables={DATABASE_URL=postgres://ecapp:ecapp@host.docker.internal:5432/ecapp?sslmode=disable,SMTP_HOST=host.docker.internal,SMTP_PORT=1025,SMTP_FROM=noreply@example.com}" \
+  --environment "Variables={DATABASE_URL=postgres://ecapp:ecapp@postgres:5432/ecapp?sslmode=disable,SMTP_HOST=mailpit,SMTP_PORT=1025,SMTP_FROM=noreply@example.com,OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317,OTEL_SERVICE_NAME=ec-notifier}" \
   --region "${AWS_REGION}" 2>/dev/null || \
 $AWS_CMD lambda update-function-code \
   --function-name ec-notifier \

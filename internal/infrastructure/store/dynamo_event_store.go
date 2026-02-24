@@ -4,13 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/example/ec-event-driven/internal/observability"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // DynamoEventStore stores events in DynamoDB.
@@ -31,6 +37,26 @@ type dynamoEvent struct {
 	Data          string `dynamodbav:"data"`
 	CreatedAt     string `dynamodbav:"created_at"`
 	GSI1PK        string `dynamodbav:"gsi1pk"`
+	TraceParent   string `dynamodbav:"trace_parent,omitempty"`
+}
+
+var tracer = otel.Tracer("ec-event-driven/store")
+
+var (
+	appendDuration metric.Float64Histogram
+	appendTotal    metric.Int64Counter
+)
+
+func init() {
+	meter := otel.Meter("ec-event-driven/store")
+
+	appendDuration, _ = meter.Float64Histogram("eventstore.append.duration",
+		metric.WithUnit("s"),
+		metric.WithDescription("EventStore Append operation duration in seconds"),
+	)
+	appendTotal, _ = meter.Int64Counter("eventstore.append.total",
+		metric.WithDescription("Total number of EventStore Append operations"),
+	)
 }
 
 func NewDynamoEventStore(client *dynamodb.Client, tableName, snapshotTableName string) *DynamoEventStore {
@@ -44,6 +70,17 @@ func NewDynamoEventStore(client *dynamodb.Client, tableName, snapshotTableName s
 // Append stores an event in DynamoDB.
 // Events are automatically streamed to Kinesis via DynamoDB Kinesis integration.
 func (es *DynamoEventStore) Append(ctx context.Context, aggregateID, aggregateType, eventType string, data any) (*Event, error) {
+	appendStart := time.Now()
+
+	ctx, span := tracer.Start(ctx, "EventStore.Append",
+		trace.WithAttributes(
+			attribute.String("aggregate_id", aggregateID),
+			attribute.String("aggregate_type", aggregateType),
+			attribute.String("event_type", eventType),
+		),
+	)
+	defer span.End()
+
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return nil, err
@@ -58,6 +95,8 @@ func (es *DynamoEventStore) Append(ctx context.Context, aggregateID, aggregateTy
 		return nil, fmt.Errorf("failed to get next version: %w", err)
 	}
 
+	traceParent := observability.InjectTraceParent(ctx)
+
 	item := dynamoEvent{
 		AggregateID:   aggregateID,
 		Version:       version,
@@ -66,7 +105,8 @@ func (es *DynamoEventStore) Append(ctx context.Context, aggregateID, aggregateTy
 		EventType:     eventType,
 		Data:          string(jsonData),
 		CreatedAt:     timestamp.Format(time.RFC3339Nano),
-		GSI1PK:        "EVENTS", // Fixed value for GSI1 to enable GetAllEvents
+		GSI1PK:        "EVENTS",
+		TraceParent:   traceParent,
 	}
 
 	av, err := attributevalue.MarshalMap(item)
@@ -84,6 +124,19 @@ func (es *DynamoEventStore) Append(ctx context.Context, aggregateID, aggregateTy
 		return nil, fmt.Errorf("failed to put event: %w", err)
 	}
 
+	metricAttrs := metric.WithAttributes(
+		attribute.String("aggregate_type", aggregateType),
+		attribute.String("event_type", eventType),
+	)
+	appendDuration.Record(ctx, time.Since(appendStart).Seconds(), metricAttrs)
+	appendTotal.Add(ctx, 1, metricAttrs)
+
+	slog.InfoContext(ctx, "event appended",
+		"event_id", eventID,
+		"aggregate_id", aggregateID,
+		"event_type", eventType,
+	)
+
 	return &Event{
 		ID:            eventID,
 		AggregateID:   aggregateID,
@@ -92,6 +145,7 @@ func (es *DynamoEventStore) Append(ctx context.Context, aggregateID, aggregateTy
 		Data:          jsonData,
 		Timestamp:     timestamp,
 		Version:       version,
+		TraceParent:   traceParent,
 	}, nil
 }
 
@@ -128,6 +182,10 @@ func (es *DynamoEventStore) getNextVersion(ctx context.Context, aggregateID stri
 // GetEvents returns all events for an aggregate from DynamoDB
 func (es *DynamoEventStore) GetEvents(aggregateID string) []Event {
 	ctx := context.Background()
+	ctx, span := tracer.Start(ctx, "EventStore.GetEvents",
+		trace.WithAttributes(attribute.String("aggregate_id", aggregateID)),
+	)
+	defer span.End()
 
 	result, err := es.client.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String(es.tableName),
@@ -184,6 +242,7 @@ func (es *DynamoEventStore) unmarshalEvents(items []map[string]types.AttributeVa
 			Data:          json.RawMessage(de.Data),
 			Timestamp:     timestamp,
 			Version:       de.Version,
+			TraceParent:   de.TraceParent,
 		})
 	}
 
@@ -266,6 +325,14 @@ func (es *DynamoEventStore) GetSnapshot(ctx context.Context, aggregateID string)
 
 // GetEventsFromVersion returns events for an aggregate starting from a specific version
 func (es *DynamoEventStore) GetEventsFromVersion(ctx context.Context, aggregateID string, fromVersion int) []Event {
+	ctx, span := tracer.Start(ctx, "EventStore.GetEventsFromVersion",
+		trace.WithAttributes(
+			attribute.String("aggregate_id", aggregateID),
+			attribute.Int("from_version", fromVersion),
+		),
+	)
+	defer span.End()
+
 	result, err := es.client.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String(es.tableName),
 		KeyConditionExpression: aws.String("aggregate_id = :aid AND version > :ver"),

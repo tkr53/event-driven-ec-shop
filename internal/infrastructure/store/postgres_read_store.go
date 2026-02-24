@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/readmodel"
@@ -614,7 +614,7 @@ func (rs *PostgresReadStore) AddProductCategory(productID, categoryID string) {
 		ON CONFLICT DO NOTHING
 	`, productID, categoryID)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error adding product category: %v", err)
+		slog.Error("failed to add product category", "product_id", productID, "category_id", categoryID, "error", err)
 	}
 }
 
@@ -622,7 +622,7 @@ func (rs *PostgresReadStore) AddProductCategory(productID, categoryID string) {
 func (rs *PostgresReadStore) RemoveProductCategory(productID, categoryID string) {
 	_, err := rs.db.Exec(`DELETE FROM product_categories WHERE product_id = $1 AND category_id = $2`, productID, categoryID)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error removing product category: %v", err)
+		slog.Error("failed to remove product category", "product_id", productID, "category_id", categoryID, "error", err)
 	}
 }
 
@@ -630,7 +630,7 @@ func (rs *PostgresReadStore) RemoveProductCategory(productID, categoryID string)
 func (rs *PostgresReadStore) GetProductCategories(productID string) []string {
 	rows, err := rs.db.Query(`SELECT category_id FROM product_categories WHERE product_id = $1`, productID)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error getting product categories: %v", err)
+		slog.Error("failed to get product categories", "product_id", productID, "error", err)
 		return nil
 	}
 	defer func() { _ = rows.Close() }()
@@ -730,7 +730,7 @@ func (rs *PostgresReadStore) SearchProducts(params SearchProductsParams) []*read
 
 	rows, err := rs.db.Query(query, args...)
 	if err != nil {
-		log.Printf("[PostgresReadStore] Error searching products: %v", err)
+		slog.Error("failed to search products", "error", err)
 		return nil
 	}
 	defer func() { _ = rows.Close() }()
@@ -740,7 +740,7 @@ func (rs *PostgresReadStore) SearchProducts(params SearchProductsParams) []*read
 		var p readmodel.ProductReadModel
 		var imageURL sql.NullString
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.Stock, &imageURL, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			log.Printf("[PostgresReadStore] Error scanning product: %v", err)
+			slog.Error("failed to scan product", "error", err)
 			continue
 		}
 		p.ImageURL = imageURL.String

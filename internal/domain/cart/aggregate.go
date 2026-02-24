@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/example/ec-event-driven/internal/domain/aggregate"
@@ -149,7 +149,7 @@ func (s *Service) AddItem(ctx context.Context, userID, productID string, quantit
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, cart, AggregateType); err != nil {
-		log.Printf("[Cart] Failed to create snapshot for cart %s: %v", cart.ID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "cart_id", cart.ID, "error", err)
 	}
 
 	return nil
@@ -191,7 +191,7 @@ func (s *Service) RemoveItem(ctx context.Context, userID, productID string) erro
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, cart, AggregateType); err != nil {
-		log.Printf("[Cart] Failed to create snapshot for cart %s: %v", cart.ID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "cart_id", cart.ID, "error", err)
 	}
 
 	return nil
@@ -228,7 +228,7 @@ func (s *Service) Clear(ctx context.Context, userID string) error {
 
 	// Check if we need to create a snapshot
 	if err := aggregate.MaybeCreateSnapshot(ctx, s.eventStore, cart, AggregateType); err != nil {
-		log.Printf("[Cart] Failed to create snapshot for cart %s: %v", cart.ID, err)
+		slog.WarnContext(ctx, "failed to create snapshot", "cart_id", cart.ID, "error", err)
 	}
 
 	return nil

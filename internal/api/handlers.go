@@ -2,7 +2,7 @@ package api
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -42,13 +42,13 @@ func (h *Handlers) CreateProduct(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) GetProducts(w http.ResponseWriter, r *http.Request) {
-	products := h.queryHandler.ListProducts()
+	products := h.queryHandler.ListProducts(r.Context())
 	respondJSON(w, http.StatusOK, products)
 }
 
 func (h *Handlers) GetProduct(w http.ResponseWriter, r *http.Request) {
 	id := extractPathParam(r.URL.Path, "/products/")
-	product, ok := h.queryHandler.GetProduct(id)
+	product, ok := h.queryHandler.GetProduct(r.Context(), id)
 	if !ok {
 		respondJSONError(w, "Product not found", http.StatusNotFound)
 		return
@@ -109,7 +109,7 @@ func (h *Handlers) AddToCart(w http.ResponseWriter, r *http.Request) {
 		Quantity:  req.Quantity,
 	}
 	if err := h.cmdHandler.AddToCart(r.Context(), cmd); err != nil {
-		log.Printf("[API] AddToCart error: %v", err)
+		slog.ErrorContext(r.Context(), "AddToCart failed", "error", err)
 		respondJSONError(w, "Failed to add item to cart", http.StatusInternalServerError)
 		return
 	}
@@ -142,7 +142,7 @@ func (h *Handlers) GetCart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cart, _ := h.queryHandler.GetCart(userID)
+	cart, _ := h.queryHandler.GetCart(r.Context(), userID)
 	respondJSON(w, http.StatusOK, cart)
 }
 
@@ -169,7 +169,7 @@ func (h *Handlers) GetOrders(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	orders := h.queryHandler.ListOrdersByUser(userID)
+	orders := h.queryHandler.ListOrdersByUser(r.Context(), userID)
 	respondJSON(w, http.StatusOK, orders)
 }
 
@@ -178,7 +178,7 @@ func (h *Handlers) GetOrder(w http.ResponseWriter, r *http.Request) {
 	// Remove /cancel suffix if present
 	id = strings.TrimSuffix(id, "/cancel")
 
-	order, ok := h.queryHandler.GetOrder(id)
+	order, ok := h.queryHandler.GetOrder(r.Context(), id)
 	if !ok {
 		respondJSONError(w, "Order not found", http.StatusNotFound)
 		return
@@ -199,7 +199,7 @@ func (h *Handlers) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSuffix(path, "/cancel")
 
 	// Authorization check: user can only cancel their own orders (admins can cancel all)
-	order, ok := h.queryHandler.GetOrder(id)
+	order, ok := h.queryHandler.GetOrder(r.Context(), id)
 	if !ok {
 		respondJSONError(w, "Order not found", http.StatusNotFound)
 		return
@@ -236,7 +236,7 @@ func (h *Handlers) PayOrder(w http.ResponseWriter, r *http.Request) {
 
 	cmd := command.PayOrder{OrderID: id}
 	if err := h.cmdHandler.PayOrder(r.Context(), cmd); err != nil {
-		log.Printf("[API] PayOrder error: %v", err)
+		slog.ErrorContext(r.Context(), "PayOrder failed", "order_id", id, "error", err)
 		respondJSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -250,7 +250,7 @@ func (h *Handlers) ShipOrder(w http.ResponseWriter, r *http.Request) {
 
 	cmd := command.ShipOrder{OrderID: id}
 	if err := h.cmdHandler.ShipOrder(r.Context(), cmd); err != nil {
-		log.Printf("[API] ShipOrder error: %v", err)
+		slog.ErrorContext(r.Context(), "ShipOrder failed", "order_id", id, "error", err)
 		respondJSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -261,7 +261,7 @@ func (h *Handlers) ShipOrder(w http.ResponseWriter, r *http.Request) {
 // Admin Handlers
 
 func (h *Handlers) GetAllOrders(w http.ResponseWriter, r *http.Request) {
-	orders := h.queryHandler.ListAllOrders()
+	orders := h.queryHandler.ListAllOrders(r.Context())
 	respondJSON(w, http.StatusOK, orders)
 }
 

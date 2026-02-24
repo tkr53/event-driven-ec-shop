@@ -2,7 +2,7 @@ package api
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -50,7 +50,7 @@ type CategoryResponse struct {
 func (h *CategoryHandlers) ListCategories(w http.ResponseWriter, r *http.Request) {
 	allCategories, err := h.readStore.GetAll("categories")
 	if err != nil {
-		log.Printf("[API] Error getting categories: %v", err)
+		slog.ErrorContext(r.Context(), "failed to get categories", "error", err)
 		respondJSONError(w, "Failed to fetch categories", http.StatusInternalServerError)
 		return
 	}

@@ -18,6 +18,7 @@ type Event struct {
 	Data          json.RawMessage `json:"data"`
 	Timestamp     time.Time       `json:"timestamp"`
 	Version       int             `json:"version"`
+	TraceParent   string          `json:"trace_parent,omitempty"`
 }
 
 // MarshalJSON returns the JSON encoding of the event
