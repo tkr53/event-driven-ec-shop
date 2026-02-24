@@ -266,6 +266,22 @@ func NewRouter(config RouterConfig) http.Handler {
 		),
 	))
 
+	mux.Handle("/api/admin/orders/", middleware.AuthMiddleware(config.JWTService)(
+		middleware.RequireRole("admin")(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path := r.URL.Path
+				switch {
+				case strings.HasSuffix(path, "/pay") && r.Method == http.MethodPost:
+					config.Handlers.PayOrder(w, r)
+				case strings.HasSuffix(path, "/ship") && r.Method == http.MethodPost:
+					config.Handlers.ShipOrder(w, r)
+				default:
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+			}),
+		),
+	))
+
 	return withCORS(withBodyLimit(withLogging(mux)))
 }
 

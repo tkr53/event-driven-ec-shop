@@ -234,6 +234,18 @@ class ApiClient {
   async getAllOrders(): Promise<Order[]> {
     return this.request<Order[]>('/api/admin/orders');
   }
+
+  async payOrder(id: string): Promise<MessageResponse> {
+    return this.request<MessageResponse>(`/api/admin/orders/${id}/pay`, {
+      method: 'POST',
+    });
+  }
+
+  async shipOrder(id: string): Promise<MessageResponse> {
+    return this.request<MessageResponse>(`/api/admin/orders/${id}/ship`, {
+      method: 'POST',
+    });
+  }
 }
 
 export const api = new ApiClient(API_BASE_URL);

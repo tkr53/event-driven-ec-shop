@@ -228,6 +228,36 @@ func (h *Handlers) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// Admin Order Actions
+
+func (h *Handlers) PayOrder(w http.ResponseWriter, r *http.Request) {
+	id := extractPathParam(r.URL.Path, "/api/admin/orders/")
+	id = strings.TrimSuffix(id, "/pay")
+
+	cmd := command.PayOrder{OrderID: id}
+	if err := h.cmdHandler.PayOrder(r.Context(), cmd); err != nil {
+		log.Printf("[API] PayOrder error: %v", err)
+		respondJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "Order paid"})
+}
+
+func (h *Handlers) ShipOrder(w http.ResponseWriter, r *http.Request) {
+	id := extractPathParam(r.URL.Path, "/api/admin/orders/")
+	id = strings.TrimSuffix(id, "/ship")
+
+	cmd := command.ShipOrder{OrderID: id}
+	if err := h.cmdHandler.ShipOrder(r.Context(), cmd); err != nil {
+		log.Printf("[API] ShipOrder error: %v", err)
+		respondJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "Order shipped"})
+}
+
 // Admin Handlers
 
 func (h *Handlers) GetAllOrders(w http.ResponseWriter, r *http.Request) {

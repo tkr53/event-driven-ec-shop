@@ -10,6 +10,7 @@ export default function AdminOrdersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [processingOrderId, setProcessingOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -61,6 +62,36 @@ export default function AdminOrdersPage() {
         {labels[status]}
       </span>
     );
+  };
+
+  const handlePayOrder = async (orderId: string) => {
+    if (!confirm('この注文の支払いを確認しますか？')) return;
+    setProcessingOrderId(orderId);
+    try {
+      await api.payOrder(orderId);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, status: 'paid' as const } : o))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '支払い確認に失敗しました');
+    } finally {
+      setProcessingOrderId(null);
+    }
+  };
+
+  const handleShipOrder = async (orderId: string) => {
+    if (!confirm('この注文を発送済みにしますか？')) return;
+    setProcessingOrderId(orderId);
+    try {
+      await api.shipOrder(orderId);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, status: 'shipped' as const } : o))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '発送処理に失敗しました');
+    } finally {
+      setProcessingOrderId(null);
+    }
   };
 
   const filteredOrders = statusFilter === 'all'
@@ -160,12 +191,32 @@ export default function AdminOrdersPage() {
                     {formatDate(order.created_at)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <Link
-                      href={`/orders/${order.id}`}
-                      className="text-blue-600 dark:text-blue-400 hover:text-blue-500"
-                    >
-                      詳細
-                    </Link>
+                    <div className="flex items-center justify-end gap-2">
+                      {order.status === 'pending' && (
+                        <button
+                          onClick={() => handlePayOrder(order.id)}
+                          disabled={processingOrderId === order.id}
+                          className="px-3 py-1 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {processingOrderId === order.id ? '処理中...' : '支払い確認'}
+                        </button>
+                      )}
+                      {order.status === 'paid' && (
+                        <button
+                          onClick={() => handleShipOrder(order.id)}
+                          disabled={processingOrderId === order.id}
+                          className="px-3 py-1 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                        >
+                          {processingOrderId === order.id ? '処理中...' : '発送済みにする'}
+                        </button>
+                      )}
+                      <Link
+                        href={`/orders/${order.id}`}
+                        className="text-blue-600 dark:text-blue-400 hover:text-blue-500 text-sm"
+                      >
+                        詳細
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ))}

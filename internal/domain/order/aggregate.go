@@ -170,6 +170,11 @@ func (s *Service) loadOrder(ctx context.Context, orderID string) (*Order, error)
 }
 
 
+// Get loads an order from the event store by replaying events
+func (s *Service) Get(ctx context.Context, orderID string) (*Order, error) {
+	return s.loadOrder(ctx, orderID)
+}
+
 func (s *Service) Place(ctx context.Context, userID string, items []OrderItem) (*Order, error) {
 	if len(items) == 0 {
 		return nil, ErrEmptyOrder

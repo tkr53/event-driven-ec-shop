@@ -168,6 +168,29 @@ func (h *Handler) PlaceOrder(ctx context.Context, cmd PlaceOrder) (*order.Order,
 	return o, nil
 }
 
+// PayOrder confirms payment and deducts reserved inventory
+func (h *Handler) PayOrder(ctx context.Context, cmd PayOrder) error {
+	// Load order from event store (write side), not read store
+	o, err := h.orderSvc.Get(ctx, cmd.OrderID)
+	if err != nil {
+		return err
+	}
+
+	// Deduct reserved inventory for each item (Reserved → Sold)
+	for _, item := range o.Items {
+		if err := h.inventorySvc.Deduct(ctx, item.ProductID, cmd.OrderID, item.Quantity); err != nil {
+			return fmt.Errorf("failed to deduct inventory for product %s: %w", item.ProductID, err)
+		}
+	}
+
+	return h.orderSvc.Pay(ctx, cmd.OrderID)
+}
+
+// ShipOrder marks an order as shipped
+func (h *Handler) ShipOrder(ctx context.Context, cmd ShipOrder) error {
+	return h.orderSvc.Ship(ctx, cmd.OrderID)
+}
+
 // CancelOrder cancels an order
 func (h *Handler) CancelOrder(ctx context.Context, cmd CancelOrder) error {
 	// Get order from read store to release inventory

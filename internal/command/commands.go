@@ -40,6 +40,14 @@ type PlaceOrder struct {
 	UserID string `json:"user_id"`
 }
 
+type PayOrder struct {
+	OrderID string `json:"order_id"`
+}
+
+type ShipOrder struct {
+	OrderID string `json:"order_id"`
+}
+
 type CancelOrder struct {
 	OrderID string `json:"order_id"`
 	Reason  string `json:"reason"`
