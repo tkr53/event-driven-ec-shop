@@ -15,8 +15,8 @@ COPY . .
 
 # Build binaries
 RUN CGO_ENABLED=0 GOOS=linux go build -o /api ./cmd/api
-RUN CGO_ENABLED=0 GOOS=linux go build -o /projector ./cmd/projector
-RUN CGO_ENABLED=0 GOOS=linux go build -o /notifier ./cmd/notifier
+RUN CGO_ENABLED=0 GOOS=linux go build -o /projector ./cmd/lambda/projector
+RUN CGO_ENABLED=0 GOOS=linux go build -o /notifier ./cmd/lambda/notifier
 
 # API image
 FROM alpine:3.19 AS api
