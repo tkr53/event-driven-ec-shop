@@ -14,6 +14,13 @@ import (
 	"github.com/example/ec-event-driven/internal/domain/user"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/readmodel"
+	cartpb "github.com/example/ec-event-driven/proto/domain/cartpb"
+	categorypb "github.com/example/ec-event-driven/proto/domain/categorypb"
+	inventorypb "github.com/example/ec-event-driven/proto/domain/inventorypb"
+	orderpb "github.com/example/ec-event-driven/proto/domain/orderpb"
+	productpb "github.com/example/ec-event-driven/proto/domain/productpb"
+	userpb "github.com/example/ec-event-driven/proto/domain/userpb"
+	"google.golang.org/protobuf/proto"
 )
 
 type Projector struct {
@@ -22,6 +29,16 @@ type Projector struct {
 
 func NewProjector(readStore store.ReadStoreInterface) *Projector {
 	return &Projector{readStore: readStore}
+}
+
+// decodeProto extracts protobuf binary from event.Data (base64-encoded JSON string)
+// and unmarshals into the given proto.Message.
+func decodeProto(data json.RawMessage, msg proto.Message) error {
+	var binaryData []byte
+	if err := json.Unmarshal(data, &binaryData); err != nil {
+		return err
+	}
+	return proto.Unmarshal(binaryData, msg)
 }
 
 func (p *Projector) HandleEvent(ctx context.Context, key, value []byte) error {
@@ -57,44 +74,45 @@ func (p *Projector) HandleEvent(ctx context.Context, key, value []byte) error {
 func (p *Projector) handleProductEvent(event store.Event) error {
 	switch event.EventType {
 	case product.EventProductCreated:
-		var e product.ProductCreated
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e productpb.ProductCreatedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_ = p.readStore.Set("products", e.ProductID, &readmodel.ProductReadModel{
-			ID:          e.ProductID,
+		createdAt, _ := time.Parse(time.RFC3339Nano, e.CreatedAt)
+		_ = p.readStore.Set("products", e.ProductId, &readmodel.ProductReadModel{
+			ID:          e.ProductId,
 			Name:        e.Name,
 			Description: e.Description,
-			Price:       e.Price,
+			Price:       int(e.Price),
 			Stock:       0,
-			CreatedAt:   e.CreatedAt,
-			UpdatedAt:   e.CreatedAt,
+			CreatedAt:   createdAt,
+			UpdatedAt:   createdAt,
 		})
 
 	case product.EventProductUpdated:
-		var e product.ProductUpdated
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e productpb.ProductUpdatedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_, _ = p.readStore.Update("products", e.ProductID, func(current any) any {
+		updatedAt, _ := time.Parse(time.RFC3339Nano, e.UpdatedAt)
+		_, _ = p.readStore.Update("products", e.ProductId, func(current any) any {
 			prod, ok := current.(*readmodel.ProductReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for ProductReadModel", "product_id", e.ProductID)
 				return current
 			}
 			prod.Name = e.Name
 			prod.Description = e.Description
-			prod.Price = e.Price
-			prod.UpdatedAt = e.UpdatedAt
+			prod.Price = int(e.Price)
+			prod.UpdatedAt = updatedAt
 			return prod
 		})
 
 	case product.EventProductDeleted:
-		var e product.ProductDeleted
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e productpb.ProductDeletedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_ = p.readStore.Delete("products", e.ProductID)
+		_ = p.readStore.Delete("products", e.ProductId)
 
 	case product.EventProductCategoryAssigned:
 		var e product.ProductCategoryAssigned
@@ -122,7 +140,6 @@ func (p *Projector) handleProductEvent(event store.Event) error {
 		_, _ = p.readStore.Update("products", e.ProductID, func(current any) any {
 			prod, ok := current.(*readmodel.ProductReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for ProductReadModel", "product_id", e.ProductID)
 				return current
 			}
 			prod.ImageURL = e.ImageURL
@@ -137,49 +154,48 @@ func (p *Projector) handleProductEvent(event store.Event) error {
 func (p *Projector) handleCartEvent(event store.Event) error {
 	switch event.EventType {
 	case cart.EventItemAdded:
-		var e cart.ItemAddedToCart
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e cartpb.ItemAddedToCartEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
 
 		productName := ""
-		if prod, ok, _ := p.readStore.Get("products", e.ProductID); ok {
+		if prod, ok, _ := p.readStore.Get("products", e.ProductId); ok {
 			if p, ok := prod.(*readmodel.ProductReadModel); ok {
 				productName = p.Name
 			}
 		}
 
-		_, ok, _ := p.readStore.Get("carts", e.CartID)
+		_, ok, _ := p.readStore.Get("carts", e.CartId)
 		if !ok {
-			_ = p.readStore.Set("carts", e.CartID, &readmodel.CartReadModel{
-				ID:     e.CartID,
-				UserID: e.UserID,
+			_ = p.readStore.Set("carts", e.CartId, &readmodel.CartReadModel{
+				ID:     e.CartId,
+				UserID: e.UserId,
 				Items: []readmodel.CartItemReadModel{
-					{ProductID: e.ProductID, Name: productName, Quantity: e.Quantity, Price: e.Price},
+					{ProductID: e.ProductId, Name: productName, Quantity: int(e.Quantity), Price: int(e.Price)},
 				},
-				Total: e.Price * e.Quantity,
+				Total: int(e.Price) * int(e.Quantity),
 			})
 		} else {
-			_, _ = p.readStore.Update("carts", e.CartID, func(current any) any {
+			_, _ = p.readStore.Update("carts", e.CartId, func(current any) any {
 				c, ok := current.(*readmodel.CartReadModel)
 				if !ok {
-					slog.Warn("type assertion failed for CartReadModel", "cart_id", e.CartID)
 					return current
 				}
 				found := false
 				for i, item := range c.Items {
-					if item.ProductID == e.ProductID {
-						c.Items[i].Quantity += e.Quantity
+					if item.ProductID == e.ProductId {
+						c.Items[i].Quantity += int(e.Quantity)
 						found = true
 						break
 					}
 				}
 				if !found {
 					c.Items = append(c.Items, readmodel.CartItemReadModel{
-						ProductID: e.ProductID,
+						ProductID: e.ProductId,
 						Name:      productName,
-						Quantity:  e.Quantity,
-						Price:     e.Price,
+						Quantity:  int(e.Quantity),
+						Price:     int(e.Price),
 					})
 				}
 				c.Total = calculateCartTotal(c.Items)
@@ -188,19 +204,18 @@ func (p *Projector) handleCartEvent(event store.Event) error {
 		}
 
 	case cart.EventItemRemoved:
-		var e cart.ItemRemovedFromCart
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e cartpb.ItemRemovedFromCartEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_, _ = p.readStore.Update("carts", e.CartID, func(current any) any {
+		_, _ = p.readStore.Update("carts", e.CartId, func(current any) any {
 			c, ok := current.(*readmodel.CartReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for CartReadModel", "cart_id", e.CartID)
 				return current
 			}
 			newItems := make([]readmodel.CartItemReadModel, 0)
 			for _, item := range c.Items {
-				if item.ProductID != e.ProductID {
+				if item.ProductID != e.ProductId {
 					newItems = append(newItems, item)
 				}
 			}
@@ -210,13 +225,13 @@ func (p *Projector) handleCartEvent(event store.Event) error {
 		})
 
 	case cart.EventCartCleared:
-		var e cart.CartCleared
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e cartpb.CartClearedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_ = p.readStore.Set("carts", e.CartID, &readmodel.CartReadModel{
-			ID:     e.CartID,
-			UserID: e.UserID,
+		_ = p.readStore.Set("carts", e.CartId, &readmodel.CartReadModel{
+			ID:     e.CartId,
+			UserID: e.UserId,
 			Items:  []readmodel.CartItemReadModel{},
 			Total:  0,
 		})
@@ -228,74 +243,75 @@ func (p *Projector) handleCartEvent(event store.Event) error {
 func (p *Projector) handleOrderEvent(event store.Event) error {
 	switch event.EventType {
 	case order.EventOrderPlaced:
-		var e order.OrderPlaced
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e orderpb.OrderPlacedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
 		items := make([]readmodel.OrderItemReadModel, len(e.Items))
 		for i, item := range e.Items {
 			items[i] = readmodel.OrderItemReadModel{
-				ProductID: item.ProductID,
+				ProductID: item.ProductId,
 				Name:      item.Name,
-				Quantity:  item.Quantity,
-				Price:     item.Price,
+				Quantity:  int(item.Quantity),
+				Price:     int(item.Price),
 			}
 		}
-		_ = p.readStore.Set("orders", e.OrderID, &readmodel.OrderReadModel{
-			ID:        e.OrderID,
-			UserID:    e.UserID,
+		placedAt, _ := time.Parse(time.RFC3339Nano, e.PlacedAt)
+		_ = p.readStore.Set("orders", e.OrderId, &readmodel.OrderReadModel{
+			ID:        e.OrderId,
+			UserID:    e.UserId,
 			Items:     items,
-			Total:     e.Total,
+			Total:     int(e.Total),
 			Status:    "pending",
-			CreatedAt: e.PlacedAt,
-			UpdatedAt: e.PlacedAt,
+			CreatedAt: placedAt,
+			UpdatedAt: placedAt,
 		})
 
 	case order.EventOrderPaid:
-		var e order.OrderPaid
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e orderpb.OrderPaidEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_, _ = p.readStore.Update("orders", e.OrderID, func(current any) any {
+		paidAt, _ := time.Parse(time.RFC3339Nano, e.PaidAt)
+		_, _ = p.readStore.Update("orders", e.OrderId, func(current any) any {
 			o, ok := current.(*readmodel.OrderReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for OrderReadModel", "order_id", e.OrderID)
 				return current
 			}
 			o.Status = "paid"
-			o.UpdatedAt = e.PaidAt
+			o.UpdatedAt = paidAt
 			return o
 		})
 
 	case order.EventOrderShipped:
-		var e order.OrderShipped
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e orderpb.OrderShippedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_, _ = p.readStore.Update("orders", e.OrderID, func(current any) any {
+		shippedAt, _ := time.Parse(time.RFC3339Nano, e.ShippedAt)
+		_, _ = p.readStore.Update("orders", e.OrderId, func(current any) any {
 			o, ok := current.(*readmodel.OrderReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for OrderReadModel", "order_id", e.OrderID)
 				return current
 			}
 			o.Status = "shipped"
-			o.UpdatedAt = e.ShippedAt
+			o.UpdatedAt = shippedAt
 			return o
 		})
 
 	case order.EventOrderCancelled:
-		var e order.OrderCancelled
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e orderpb.OrderCancelledEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_, _ = p.readStore.Update("orders", e.OrderID, func(current any) any {
+		cancelledAt, _ := time.Parse(time.RFC3339Nano, e.CancelledAt)
+		_, _ = p.readStore.Update("orders", e.OrderId, func(current any) any {
 			o, ok := current.(*readmodel.OrderReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for OrderReadModel", "order_id", e.OrderID)
 				return current
 			}
 			o.Status = "cancelled"
-			o.UpdatedAt = e.CancelledAt
+			o.UpdatedAt = cancelledAt
 			return o
 		})
 	}
@@ -306,107 +322,244 @@ func (p *Projector) handleOrderEvent(event store.Event) error {
 func (p *Projector) handleInventoryEvent(event store.Event) error {
 	switch event.EventType {
 	case inventory.EventStockAdded:
-		var e inventory.StockAdded
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e inventorypb.StockAddedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		existing, ok, _ := p.readStore.Get("inventory", e.ProductID)
+		existing, ok, _ := p.readStore.Get("inventory", e.ProductId)
 		if !ok {
-			_ = p.readStore.Set("inventory", e.ProductID, &readmodel.InventoryReadModel{
-				ProductID:      e.ProductID,
-				TotalStock:     e.Quantity,
+			_ = p.readStore.Set("inventory", e.ProductId, &readmodel.InventoryReadModel{
+				ProductID:      e.ProductId,
+				TotalStock:     int(e.Quantity),
 				ReservedStock:  0,
-				AvailableStock: e.Quantity,
+				AvailableStock: int(e.Quantity),
 			})
 		} else {
-			inv, ok := existing.(*readmodel.InventoryReadModel)
-			if !ok {
-				slog.Warn("type assertion failed for InventoryReadModel", "product_id", e.ProductID)
-				return nil
-			}
-			inv.TotalStock += e.Quantity
+			inv := existing.(*readmodel.InventoryReadModel)
+			inv.TotalStock += int(e.Quantity)
 			inv.AvailableStock = inv.TotalStock - inv.ReservedStock
-			_ = p.readStore.Set("inventory", e.ProductID, inv)
+			_ = p.readStore.Set("inventory", e.ProductId, inv)
 		}
 
-		_, _ = p.readStore.Update("products", e.ProductID, func(current any) any {
+		_, _ = p.readStore.Update("products", e.ProductId, func(current any) any {
 			prod, ok := current.(*readmodel.ProductReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for ProductReadModel", "product_id", e.ProductID)
 				return current
 			}
-			prod.Stock += e.Quantity
+			prod.Stock += int(e.Quantity)
 			prod.UpdatedAt = time.Now()
 			return prod
 		})
 
 	case inventory.EventStockReserved:
-		var e inventory.StockReserved
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e inventorypb.StockReservedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_, _ = p.readStore.Update("inventory", e.ProductID, func(current any) any {
+		_, _ = p.readStore.Update("inventory", e.ProductId, func(current any) any {
 			inv, ok := current.(*readmodel.InventoryReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for InventoryReadModel", "product_id", e.ProductID)
 				return current
 			}
-			inv.ReservedStock += e.Quantity
+			inv.ReservedStock += int(e.Quantity)
 			inv.AvailableStock = inv.TotalStock - inv.ReservedStock
 			return inv
 		})
-		_, _ = p.readStore.Update("products", e.ProductID, func(current any) any {
+		_, _ = p.readStore.Update("products", e.ProductId, func(current any) any {
 			prod, ok := current.(*readmodel.ProductReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for ProductReadModel", "product_id", e.ProductID)
 				return current
 			}
-			prod.Stock -= e.Quantity
+			prod.Stock -= int(e.Quantity)
 			prod.UpdatedAt = time.Now()
 			return prod
 		})
 
 	case inventory.EventStockReleased:
-		var e inventory.StockReleased
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e inventorypb.StockReleasedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_, _ = p.readStore.Update("inventory", e.ProductID, func(current any) any {
+		_, _ = p.readStore.Update("inventory", e.ProductId, func(current any) any {
 			inv, ok := current.(*readmodel.InventoryReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for InventoryReadModel", "product_id", e.ProductID)
 				return current
 			}
-			inv.ReservedStock -= e.Quantity
+			inv.ReservedStock -= int(e.Quantity)
 			inv.AvailableStock = inv.TotalStock - inv.ReservedStock
 			return inv
 		})
-		_, _ = p.readStore.Update("products", e.ProductID, func(current any) any {
+		_, _ = p.readStore.Update("products", e.ProductId, func(current any) any {
 			prod, ok := current.(*readmodel.ProductReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for ProductReadModel", "product_id", e.ProductID)
 				return current
 			}
-			prod.Stock += e.Quantity
+			prod.Stock += int(e.Quantity)
 			prod.UpdatedAt = time.Now()
 			return prod
 		})
 
 	case inventory.EventStockDeducted:
-		var e inventory.StockDeducted
-		if err := json.Unmarshal(event.Data, &e); err != nil {
+		var e inventorypb.StockDeductedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
 			return err
 		}
-		_, _ = p.readStore.Update("inventory", e.ProductID, func(current any) any {
+		_, _ = p.readStore.Update("inventory", e.ProductId, func(current any) any {
 			inv, ok := current.(*readmodel.InventoryReadModel)
 			if !ok {
-				slog.Warn("type assertion failed for InventoryReadModel", "product_id", e.ProductID)
 				return current
 			}
-			inv.TotalStock -= e.Quantity
-			inv.ReservedStock -= e.Quantity
+			inv.TotalStock -= int(e.Quantity)
+			inv.ReservedStock -= int(e.Quantity)
 			inv.AvailableStock = inv.TotalStock - inv.ReservedStock
 			return inv
+		})
+	}
+
+	return nil
+}
+
+func (p *Projector) handleUserEvent(event store.Event) error {
+	switch event.EventType {
+	case user.EventUserCreated:
+		var e userpb.UserCreatedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
+			return err
+		}
+		createdAt, _ := time.Parse(time.RFC3339Nano, e.CreatedAt)
+		_ = p.readStore.Set("users", e.UserId, &readmodel.UserReadModel{
+			ID:           e.UserId,
+			Email:        e.Email,
+			PasswordHash: e.PasswordHash,
+			Name:         e.Name,
+			Role:         e.Role,
+			IsActive:     true,
+			CreatedAt:    createdAt,
+			UpdatedAt:    createdAt,
+		})
+
+	case user.EventUserUpdated:
+		var e userpb.UserUpdatedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
+			return err
+		}
+		updatedAt, _ := time.Parse(time.RFC3339Nano, e.UpdatedAt)
+		_, _ = p.readStore.Update("users", e.UserId, func(current any) any {
+			u, ok := current.(*readmodel.UserReadModel)
+			if !ok {
+				return current
+			}
+			u.Name = e.Name
+			u.UpdatedAt = updatedAt
+			return u
+		})
+
+	case user.EventUserPasswordChanged:
+		var e userpb.UserPasswordChangedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
+			return err
+		}
+		changedAt, _ := time.Parse(time.RFC3339Nano, e.ChangedAt)
+		_, _ = p.readStore.Update("users", e.UserId, func(current any) any {
+			u, ok := current.(*readmodel.UserReadModel)
+			if !ok {
+				return current
+			}
+			u.PasswordHash = e.PasswordHash
+			u.UpdatedAt = changedAt
+			return u
+		})
+
+	case user.EventUserDeactivated:
+		var e userpb.UserDeactivatedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
+			return err
+		}
+		deactivatedAt, _ := time.Parse(time.RFC3339Nano, e.DeactivatedAt)
+		_, _ = p.readStore.Update("users", e.UserId, func(current any) any {
+			u, ok := current.(*readmodel.UserReadModel)
+			if !ok {
+				return current
+			}
+			u.IsActive = false
+			u.UpdatedAt = deactivatedAt
+			return u
+		})
+
+	case user.EventUserActivated:
+		var e userpb.UserActivatedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
+			return err
+		}
+		activatedAt, _ := time.Parse(time.RFC3339Nano, e.ActivatedAt)
+		_, _ = p.readStore.Update("users", e.UserId, func(current any) any {
+			u, ok := current.(*readmodel.UserReadModel)
+			if !ok {
+				return current
+			}
+			u.IsActive = true
+			u.UpdatedAt = activatedAt
+			return u
+		})
+	}
+
+	return nil
+}
+
+func (p *Projector) handleCategoryEvent(event store.Event) error {
+	switch event.EventType {
+	case category.EventCategoryCreated:
+		var e categorypb.CategoryCreatedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
+			return err
+		}
+		createdAt, _ := time.Parse(time.RFC3339Nano, e.CreatedAt)
+		_ = p.readStore.Set("categories", e.CategoryId, &readmodel.CategoryReadModel{
+			ID:          e.CategoryId,
+			Name:        e.Name,
+			Slug:        e.Slug,
+			Description: e.Description,
+			ParentID:    e.ParentId,
+			SortOrder:   int(e.SortOrder),
+			IsActive:    true,
+			CreatedAt:   createdAt,
+			UpdatedAt:   createdAt,
+		})
+
+	case category.EventCategoryUpdated:
+		var e categorypb.CategoryUpdatedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
+			return err
+		}
+		updatedAt, _ := time.Parse(time.RFC3339Nano, e.UpdatedAt)
+		_, _ = p.readStore.Update("categories", e.CategoryId, func(current any) any {
+			c, ok := current.(*readmodel.CategoryReadModel)
+			if !ok {
+				return current
+			}
+			c.Name = e.Name
+			c.Slug = e.Slug
+			c.Description = e.Description
+			c.ParentID = e.ParentId
+			c.SortOrder = int(e.SortOrder)
+			c.UpdatedAt = updatedAt
+			return c
+		})
+
+	case category.EventCategoryDeleted:
+		var e categorypb.CategoryDeletedEvent
+		if err := decodeProto(event.Data, &e); err != nil {
+			return err
+		}
+		deletedAt, _ := time.Parse(time.RFC3339Nano, e.DeletedAt)
+		_, _ = p.readStore.Update("categories", e.CategoryId, func(current any) any {
+			c, ok := current.(*readmodel.CategoryReadModel)
+			if !ok {
+				return current
+			}
+			c.IsActive = false
+			c.UpdatedAt = deletedAt
+			return c
 		})
 	}
 
@@ -419,149 +572,4 @@ func calculateCartTotal(items []readmodel.CartItemReadModel) int {
 		total += item.Price * item.Quantity
 	}
 	return total
-}
-
-func (p *Projector) handleUserEvent(event store.Event) error {
-	switch event.EventType {
-	case user.EventUserCreated:
-		var e user.UserCreated
-		if err := json.Unmarshal(event.Data, &e); err != nil {
-			return err
-		}
-		_ = p.readStore.Set("users", e.UserID, &readmodel.UserReadModel{
-			ID:           e.UserID,
-			Email:        e.Email,
-			PasswordHash: e.PasswordHash,
-			Name:         e.Name,
-			Role:         e.Role,
-			IsActive:     true,
-			CreatedAt:    e.CreatedAt,
-			UpdatedAt:    e.CreatedAt,
-		})
-
-	case user.EventUserUpdated:
-		var e user.UserUpdated
-		if err := json.Unmarshal(event.Data, &e); err != nil {
-			return err
-		}
-		_, _ = p.readStore.Update("users", e.UserID, func(current any) any {
-			u, ok := current.(*readmodel.UserReadModel)
-			if !ok {
-				slog.Warn("type assertion failed for UserReadModel", "user_id", e.UserID)
-				return current
-			}
-			u.Name = e.Name
-			u.UpdatedAt = e.UpdatedAt
-			return u
-		})
-
-	case user.EventUserPasswordChanged:
-		var e user.UserPasswordChanged
-		if err := json.Unmarshal(event.Data, &e); err != nil {
-			return err
-		}
-		_, _ = p.readStore.Update("users", e.UserID, func(current any) any {
-			u, ok := current.(*readmodel.UserReadModel)
-			if !ok {
-				slog.Warn("type assertion failed for UserReadModel", "user_id", e.UserID)
-				return current
-			}
-			u.PasswordHash = e.PasswordHash
-			u.UpdatedAt = e.ChangedAt
-			return u
-		})
-
-	case user.EventUserDeactivated:
-		var e user.UserDeactivated
-		if err := json.Unmarshal(event.Data, &e); err != nil {
-			return err
-		}
-		_, _ = p.readStore.Update("users", e.UserID, func(current any) any {
-			u, ok := current.(*readmodel.UserReadModel)
-			if !ok {
-				slog.Warn("type assertion failed for UserReadModel", "user_id", e.UserID)
-				return current
-			}
-			u.IsActive = false
-			u.UpdatedAt = e.DeactivatedAt
-			return u
-		})
-
-	case user.EventUserActivated:
-		var e user.UserActivated
-		if err := json.Unmarshal(event.Data, &e); err != nil {
-			return err
-		}
-		_, _ = p.readStore.Update("users", e.UserID, func(current any) any {
-			u, ok := current.(*readmodel.UserReadModel)
-			if !ok {
-				slog.Warn("type assertion failed for UserReadModel", "user_id", e.UserID)
-				return current
-			}
-			u.IsActive = true
-			u.UpdatedAt = e.ActivatedAt
-			return u
-		})
-	}
-
-	return nil
-}
-
-func (p *Projector) handleCategoryEvent(event store.Event) error {
-	switch event.EventType {
-	case category.EventCategoryCreated:
-		var e category.CategoryCreated
-		if err := json.Unmarshal(event.Data, &e); err != nil {
-			return err
-		}
-		_ = p.readStore.Set("categories", e.CategoryID, &readmodel.CategoryReadModel{
-			ID:          e.CategoryID,
-			Name:        e.Name,
-			Slug:        e.Slug,
-			Description: e.Description,
-			ParentID:    e.ParentID,
-			SortOrder:   e.SortOrder,
-			IsActive:    true,
-			CreatedAt:   e.CreatedAt,
-			UpdatedAt:   e.CreatedAt,
-		})
-
-	case category.EventCategoryUpdated:
-		var e category.CategoryUpdated
-		if err := json.Unmarshal(event.Data, &e); err != nil {
-			return err
-		}
-		_, _ = p.readStore.Update("categories", e.CategoryID, func(current any) any {
-			c, ok := current.(*readmodel.CategoryReadModel)
-			if !ok {
-				slog.Warn("type assertion failed for CategoryReadModel", "category_id", e.CategoryID)
-				return current
-			}
-			c.Name = e.Name
-			c.Slug = e.Slug
-			c.Description = e.Description
-			c.ParentID = e.ParentID
-			c.SortOrder = e.SortOrder
-			c.UpdatedAt = e.UpdatedAt
-			return c
-		})
-
-	case category.EventCategoryDeleted:
-		var e category.CategoryDeleted
-		if err := json.Unmarshal(event.Data, &e); err != nil {
-			return err
-		}
-		_, _ = p.readStore.Update("categories", e.CategoryID, func(current any) any {
-			c, ok := current.(*readmodel.CategoryReadModel)
-			if !ok {
-				slog.Warn("type assertion failed for CategoryReadModel", "category_id", e.CategoryID)
-				return current
-			}
-			c.IsActive = false
-			c.UpdatedAt = e.DeletedAt
-			return c
-		})
-	}
-
-	return nil
 }

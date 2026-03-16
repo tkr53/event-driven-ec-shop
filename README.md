@@ -1,8 +1,10 @@
 # EC Shop - Event Driven + CQRS Learning Project
 
-Go + AWS Kinesis Data Streams + DynamoDB + PostgreSQL を使った**イベント駆動アーキテクチャ**と**CQRS（Command Query Responsibility Segregation）パターン**を学ぶためのECサイトバックエンドです。
+Go + Proto.Actor + AWS Kinesis Data Streams + DynamoDB + PostgreSQL を使った**イベント駆動アーキテクチャ**と**CQRS（Command Query Responsibility Segregation）パターン**を学ぶためのECサイトバックエンドです。
 
 **特徴:**
+- **Proto.Actor** によるイベントソースドアクターモデル（メールボックスによる自然な並行制御）
+- **Protobuf** による型安全なコマンド/イベント/スナップショット定義
 - **書き込みDB**と**読み取りDB**を完全分離したCQRS実装
 - **DynamoDB → Kinesis 自動CDC**によるイベント駆動の読み取りモデル更新
 - **Lambda**による非同期イベント処理
@@ -46,17 +48,17 @@ Go + AWS Kinesis Data Streams + DynamoDB + PostgreSQL を使った**イベント
 │          ┌───────────────────────┴───────────────────────┐                  │
 │          ▼                                               ▼                  │
 │  ┌───────────────────┐                         ┌───────────────────┐       │
-│  │  Command Handler  │                         │  Query Handler    │       │
+│  │  ActorHandler     │                         │  Query Handler    │       │
 │  │  (Write側)        │                         │  (Read側)         │       │
 │  └─────────┬─────────┘                         └─────────┬─────────┘       │
 │            │                                             │                  │
 │            ▼                                             ▼                  │
 │  ┌───────────────────┐                         ┌───────────────────┐       │
-│  │  Domain Services  │                         │  PostgreSQL       │       │
-│  │  (Product, Cart,  │                         │  (Read Tables)    │       │
-│  │   Order, Inventory)│                         │  read_products    │       │
+│  │  Proto.Actor      │                         │  PostgreSQL       │       │
+│  │  Aggregate Actors │                         │  (Read Tables)    │       │
+│  │  (Protobuf binary)│                         │  read_products    │       │
 │  └─────────┬─────────┘                         │  read_carts       │       │
-│            │                                   │  read_orders      │       │
+│            │ PersistReceive                    │  read_orders      │       │
 │            ▼                                   │  read_inventory   │       │
 │  ┌───────────────────┐                         └───────────────────┘       │
 │  │  Event Store      │                                   ▲                  │
@@ -228,9 +230,16 @@ event-driven-app/
 │   │   ├── handlers.go          # HTTPハンドラー
 │   │   └── router.go            # ルーティング設定
 │   │
+│   ├── actor/                  # Proto.Actor アクター層
+│   │   ├── system.go            # ActorSystem 管理
+│   │   ├── persistence/         # DynamoDB PersistenceProvider (protobuf binary)
+│   │   ├── aggregate/           # イベントソースドアクター（Product, Cart, Order, etc.）
+│   │   └── saga/                # Saga アクター（PlaceOrder）
+│   │
 │   ├── command/                 # コマンド層（CQRS の Command側）
 │   │   ├── commands.go          # コマンド定義（DTO）
-│   │   └── handler.go           # コマンドハンドラー
+│   │   ├── actor_handler.go     # アクター経由コマンドハンドラー
+│   │   └── interface.go         # CommandHandler インターフェース
 │   │
 │   ├── query/                   # クエリ層（CQRS の Query側）
 │   │   ├── handler.go           # クエリハンドラー
@@ -313,7 +322,9 @@ event-driven-app/
 
 | 技術 | 用途 | バージョン |
 |------|------|-----------|
-| **Go** | バックエンド言語 | 1.24 |
+| **Go** | バックエンド言語 | 1.25 |
+| **Proto.Actor** | アクターモデルフレームワーク | Latest |
+| **Protocol Buffers** | メッセージ定義（コマンド/イベント/スナップショット） | proto3 |
 | **AWS Kinesis Data Streams** | イベントストリーミング | - |
 | **AWS Lambda** | イベント処理（Projector, Notifier） | provided.al2023 |
 | **DynamoDB** | Write DB（イベントストア） | Local / AWS |
@@ -371,6 +382,8 @@ Kinesis Data Streams 統合:
 
 | ライブラリ | 用途 |
 |-----------|------|
+| `github.com/asynkron/protoactor-go` | Proto.Actor アクターモデル |
+| `google.golang.org/protobuf` | Protocol Buffers ランタイム |
 | `github.com/aws/aws-lambda-go` | Lambda ランタイム |
 | `github.com/aws/aws-sdk-go-v2` | AWS SDK（DynamoDB用） |
 | `github.com/lib/pq` | PostgreSQLドライバ |
@@ -383,7 +396,8 @@ Kinesis Data Streams 統合:
 ### 必要条件
 
 - Docker & Docker Compose
-- Go 1.24+ （ローカル開発時）
+- Go 1.25+ （ローカル開発時）
+- protoc + protoc-gen-go（Protobuf コード生成、`make proto`）
 - AWS CLI（状態確認用、オプション）
 
 ### 起動方法
@@ -644,9 +658,9 @@ type Inventory struct {
 1. POST /products
        │
        ▼
-2. Command Handler
-   └─ ProductService.Create()
-   └─ InventoryService.AddStock()
+2. ActorHandler
+   └─ Product Actor (PersistReceive → ProductCreated)
+   └─ Inventory Actor (PersistReceive → StockAdded)
        │
        ▼
 3. Event Store (DynamoDB)
@@ -672,11 +686,11 @@ type Inventory struct {
 1. POST /orders
        │
        ▼
-2. Command Handler
+2. ActorHandler
    ├─ カートからアイテム取得（read_carts から）
-   ├─ OrderService.Place()       → OrderPlaced イベント
-   ├─ InventoryService.Reserve() → StockReserved イベント
-   └─ CartService.Clear()        → CartCleared イベント
+   ├─ Order Actor (PersistReceive → OrderPlaced)
+   ├─ Inventory Actor × N (PersistReceive → StockReserved) ※失敗時は補償トランザクション
+   └─ Cart Actor (PersistReceive → CartCleared)
        │
        ▼
 3. Event Store (DynamoDB)

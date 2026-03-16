@@ -1,0 +1,100 @@
+syntax = "proto3";
+package domain.user;
+
+option go_package = "github.com/example/ec-event-driven/proto/domain/userpb";
+
+// Commands
+message RegisterUserCommand {
+  string email = 1;
+  string password = 2;
+  string name = 3;
+  string role = 4;
+}
+
+message UpdateProfileCommand {
+  string user_id = 1;
+  string name = 2;
+}
+
+message ChangePasswordCommand {
+  string user_id = 1;
+  string new_password = 2;
+}
+
+message RecordLoginCommand {
+  string user_id = 1;
+  string session_id = 2;
+  string ip_address = 3;
+  string user_agent = 4;
+}
+
+message RecordLogoutCommand {
+  string user_id = 1;
+  string session_id = 2;
+}
+
+message DeactivateUserCommand {
+  string user_id = 1;
+}
+
+message ActivateUserCommand {
+  string user_id = 1;
+}
+
+// Events
+message UserCreatedEvent {
+  string user_id = 1;
+  string email = 2;
+  string password_hash = 3;
+  string name = 4;
+  string role = 5;
+  string created_at = 6;
+}
+
+message UserUpdatedEvent {
+  string user_id = 1;
+  string name = 2;
+  string updated_at = 3;
+}
+
+message UserPasswordChangedEvent {
+  string user_id = 1;
+  string password_hash = 2;
+  string changed_at = 3;
+}
+
+message UserLoggedInEvent {
+  string user_id = 1;
+  string session_id = 2;
+  string ip_address = 3;
+  string user_agent = 4;
+  string logged_at = 5;
+}
+
+message UserLoggedOutEvent {
+  string user_id = 1;
+  string session_id = 2;
+  string logged_at = 3;
+}
+
+message UserDeactivatedEvent {
+  string user_id = 1;
+  string deactivated_at = 2;
+}
+
+message UserActivatedEvent {
+  string user_id = 1;
+  string activated_at = 2;
+}
+
+// Snapshot
+message UserSnapshot {
+  string id = 1;
+  string email = 2;
+  string password_hash = 3;
+  string name = 4;
+  string role = 5;
+  bool is_active = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}

@@ -15,8 +15,15 @@ import (
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/infrastructure/store/mocks"
 	"github.com/example/ec-event-driven/internal/readmodel"
+	cartpb "github.com/example/ec-event-driven/proto/domain/cartpb"
+	categorypb "github.com/example/ec-event-driven/proto/domain/categorypb"
+	inventorypb "github.com/example/ec-event-driven/proto/domain/inventorypb"
+	orderpb "github.com/example/ec-event-driven/proto/domain/orderpb"
+	productpb "github.com/example/ec-event-driven/proto/domain/productpb"
+	userpb "github.com/example/ec-event-driven/proto/domain/userpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 func newTestProjector() (*Projector, *mocks.MockReadStore) {
@@ -25,7 +32,24 @@ func newTestProjector() (*Projector, *mocks.MockReadStore) {
 	return projector, readStore
 }
 
-func makeEvent(aggregateType, eventType string, data any) []byte {
+// makeEvent creates a serialized event with protobuf binary data (base64-encoded in JSON).
+func makeEvent(aggregateType, eventType string, pbMsg proto.Message) []byte {
+	binaryData, _ := proto.Marshal(pbMsg)
+	jsonData, _ := json.Marshal(binaryData) // base64-encodes the binary
+	event := store.Event{
+		ID:            "event-123",
+		AggregateID:   "agg-123",
+		AggregateType: aggregateType,
+		EventType:     eventType,
+		Data:          jsonData,
+		Timestamp:     time.Now(),
+	}
+	result, _ := json.Marshal(event)
+	return result
+}
+
+// makeEventJSON creates a serialized event with raw JSON data (for legacy events).
+func makeEventJSON(aggregateType, eventType string, data any) []byte {
 	jsonData, _ := json.Marshal(data)
 	event := store.Event{
 		ID:            "event-123",
@@ -47,13 +71,13 @@ func TestProjector_HandleProductCreated(t *testing.T) {
 	projector, readStore := newTestProjector()
 	ctx := context.Background()
 
-	eventData := product.ProductCreated{
-		ProductID:   "prod-123",
+	eventData := &productpb.ProductCreatedEvent{
+		ProductId:   "prod-123",
 		Name:        "Test Product",
 		Description: "A test product",
 		Price:       1000,
 		Stock:       50,
-		CreatedAt:   time.Now(),
+		CreatedAt:   time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(product.AggregateType, product.EventProductCreated, eventData)
@@ -81,12 +105,12 @@ func TestProjector_HandleProductUpdated(t *testing.T) {
 		Price: 500,
 	})
 
-	eventData := product.ProductUpdated{
-		ProductID:   "prod-123",
+	eventData := &productpb.ProductUpdatedEvent{
+		ProductId:   "prod-123",
 		Name:        "New Name",
 		Description: "Updated description",
 		Price:       2000,
-		UpdatedAt:   time.Now(),
+		UpdatedAt:   time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(product.AggregateType, product.EventProductUpdated, eventData)
@@ -107,9 +131,9 @@ func TestProjector_HandleProductDeleted(t *testing.T) {
 	// Set up existing product
 	readStore.SetData("products", "prod-123", &readmodel.ProductReadModel{ID: "prod-123"})
 
-	eventData := product.ProductDeleted{
-		ProductID: "prod-123",
-		DeletedAt: time.Now(),
+	eventData := &productpb.ProductDeletedEvent{
+		ProductId: "prod-123",
+		DeletedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(product.AggregateType, product.EventProductDeleted, eventData)
@@ -129,12 +153,14 @@ func TestProjector_HandleOrderPlaced(t *testing.T) {
 	projector, readStore := newTestProjector()
 	ctx := context.Background()
 
-	eventData := order.OrderPlaced{
-		OrderID:  "order-123",
-		UserID:   "user-123",
-		Items:    []order.OrderItem{{ProductID: "prod-1", Quantity: 2, Price: 1000}},
+	eventData := &orderpb.OrderPlacedEvent{
+		OrderId: "order-123",
+		UserId:  "user-123",
+		Items: []*orderpb.OrderItem{
+			{ProductId: "prod-1", Quantity: 2, Price: 1000},
+		},
 		Total:    2000,
-		PlacedAt: time.Now(),
+		PlacedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(order.AggregateType, order.EventOrderPlaced, eventData)
@@ -162,9 +188,9 @@ func TestProjector_HandleOrderPaid(t *testing.T) {
 		Status: "pending",
 	})
 
-	eventData := order.OrderPaid{
-		OrderID: "order-123",
-		PaidAt:  time.Now(),
+	eventData := &orderpb.OrderPaidEvent{
+		OrderId: "order-123",
+		PaidAt:  time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(order.AggregateType, order.EventOrderPaid, eventData)
@@ -186,9 +212,9 @@ func TestProjector_HandleOrderShipped(t *testing.T) {
 		Status: "paid",
 	})
 
-	eventData := order.OrderShipped{
-		OrderID:   "order-123",
-		ShippedAt: time.Now(),
+	eventData := &orderpb.OrderShippedEvent{
+		OrderId:   "order-123",
+		ShippedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(order.AggregateType, order.EventOrderShipped, eventData)
@@ -210,10 +236,10 @@ func TestProjector_HandleOrderCancelled(t *testing.T) {
 		Status: "pending",
 	})
 
-	eventData := order.OrderCancelled{
-		OrderID:     "order-123",
+	eventData := &orderpb.OrderCancelledEvent{
+		OrderId:     "order-123",
 		Reason:      "customer request",
-		CancelledAt: time.Now(),
+		CancelledAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(order.AggregateType, order.EventOrderCancelled, eventData)
@@ -234,10 +260,10 @@ func TestProjector_HandleStockAdded_NewInventory(t *testing.T) {
 	projector, readStore := newTestProjector()
 	ctx := context.Background()
 
-	eventData := inventory.StockAdded{
-		ProductID: "prod-123",
+	eventData := &inventorypb.StockAddedEvent{
+		ProductId: "prod-123",
 		Quantity:  100,
-		AddedAt:   time.Now(),
+		AddedAt:   time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(inventory.AggregateType, inventory.EventStockAdded, eventData)
@@ -267,10 +293,10 @@ func TestProjector_HandleStockAdded_ExistingInventory(t *testing.T) {
 		AvailableStock: 40,
 	})
 
-	eventData := inventory.StockAdded{
-		ProductID: "prod-123",
+	eventData := &inventorypb.StockAddedEvent{
+		ProductId: "prod-123",
 		Quantity:  30,
-		AddedAt:   time.Now(),
+		AddedAt:   time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(inventory.AggregateType, inventory.EventStockAdded, eventData)
@@ -300,11 +326,11 @@ func TestProjector_HandleStockReserved(t *testing.T) {
 		Stock: 100,
 	})
 
-	eventData := inventory.StockReserved{
-		ProductID:  "prod-123",
-		OrderID:    "order-123",
+	eventData := &inventorypb.StockReservedEvent{
+		ProductId:  "prod-123",
+		OrderId:    "order-123",
 		Quantity:   20,
-		ReservedAt: time.Now(),
+		ReservedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(inventory.AggregateType, inventory.EventStockReserved, eventData)
@@ -334,11 +360,11 @@ func TestProjector_HandleStockReleased(t *testing.T) {
 		Stock: 70,
 	})
 
-	eventData := inventory.StockReleased{
-		ProductID:  "prod-123",
-		OrderID:    "order-123",
+	eventData := &inventorypb.StockReleasedEvent{
+		ProductId:  "prod-123",
+		OrderId:    "order-123",
 		Quantity:   10,
-		ReleasedAt: time.Now(),
+		ReleasedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(inventory.AggregateType, inventory.EventStockReleased, eventData)
@@ -367,13 +393,13 @@ func TestProjector_HandleItemAdded_NewCart(t *testing.T) {
 		Name: "Test Product",
 	})
 
-	eventData := cart.ItemAddedToCart{
-		CartID:    "cart-user-123",
-		UserID:    "user-123",
-		ProductID: "prod-123",
+	eventData := &cartpb.ItemAddedToCartEvent{
+		CartId:    "cart-user-123",
+		UserId:    "user-123",
+		ProductId: "prod-123",
 		Quantity:  2,
 		Price:     1000,
-		AddedAt:   time.Now(),
+		AddedAt:   time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(cart.AggregateType, cart.EventItemAdded, eventData)
@@ -405,13 +431,13 @@ func TestProjector_HandleItemAdded_ExistingCart(t *testing.T) {
 		Total: 500,
 	})
 
-	eventData := cart.ItemAddedToCart{
-		CartID:    "cart-user-123",
-		UserID:    "user-123",
-		ProductID: "prod-456",
+	eventData := &cartpb.ItemAddedToCartEvent{
+		CartId:    "cart-user-123",
+		UserId:    "user-123",
+		ProductId: "prod-456",
 		Quantity:  2,
 		Price:     1000,
-		AddedAt:   time.Now(),
+		AddedAt:   time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(cart.AggregateType, cart.EventItemAdded, eventData)
@@ -439,11 +465,11 @@ func TestProjector_HandleItemRemoved(t *testing.T) {
 		Total: 2500,
 	})
 
-	eventData := cart.ItemRemovedFromCart{
-		CartID:    "cart-user-123",
-		UserID:    "user-123",
-		ProductID: "prod-1",
-		RemovedAt: time.Now(),
+	eventData := &cartpb.ItemRemovedFromCartEvent{
+		CartId:    "cart-user-123",
+		UserId:    "user-123",
+		ProductId: "prod-1",
+		RemovedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(cart.AggregateType, cart.EventItemRemoved, eventData)
@@ -471,10 +497,10 @@ func TestProjector_HandleCartCleared(t *testing.T) {
 		Total: 2000,
 	})
 
-	eventData := cart.CartCleared{
-		CartID:    "cart-user-123",
-		UserID:    "user-123",
-		ClearedAt: time.Now(),
+	eventData := &cartpb.CartClearedEvent{
+		CartId:    "cart-user-123",
+		UserId:    "user-123",
+		ClearedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(cart.AggregateType, cart.EventCartCleared, eventData)
@@ -496,13 +522,13 @@ func TestProjector_HandleUserCreated(t *testing.T) {
 	projector, readStore := newTestProjector()
 	ctx := context.Background()
 
-	eventData := user.UserCreated{
-		UserID:       "user-123",
+	eventData := &userpb.UserCreatedEvent{
+		UserId:       "user-123",
 		Email:        "test@example.com",
 		PasswordHash: "hashed",
 		Name:         "Test User",
 		Role:         "customer",
-		CreatedAt:    time.Now(),
+		CreatedAt:    time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(user.AggregateType, user.EventUserCreated, eventData)
@@ -529,9 +555,9 @@ func TestProjector_HandleUserDeactivated(t *testing.T) {
 		IsActive: true,
 	})
 
-	eventData := user.UserDeactivated{
-		UserID:        "user-123",
-		DeactivatedAt: time.Now(),
+	eventData := &userpb.UserDeactivatedEvent{
+		UserId:        "user-123",
+		DeactivatedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(user.AggregateType, user.EventUserDeactivated, eventData)
@@ -552,13 +578,13 @@ func TestProjector_HandleCategoryCreated(t *testing.T) {
 	projector, readStore := newTestProjector()
 	ctx := context.Background()
 
-	eventData := category.CategoryCreated{
-		CategoryID:  "cat-123",
+	eventData := &categorypb.CategoryCreatedEvent{
+		CategoryId:  "cat-123",
 		Name:        "Electronics",
 		Slug:        "electronics",
 		Description: "Electronic devices",
 		SortOrder:   1,
-		CreatedAt:   time.Now(),
+		CreatedAt:   time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(category.AggregateType, category.EventCategoryCreated, eventData)
@@ -585,9 +611,9 @@ func TestProjector_HandleCategoryDeleted(t *testing.T) {
 		IsActive: true,
 	})
 
-	eventData := category.CategoryDeleted{
-		CategoryID: "cat-123",
-		DeletedAt:  time.Now(),
+	eventData := &categorypb.CategoryDeletedEvent{
+		CategoryId: "cat-123",
+		DeletedAt:  time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(category.AggregateType, category.EventCategoryDeleted, eventData)
@@ -661,7 +687,7 @@ func TestProjector_HandleProductImageUpdated(t *testing.T) {
 		UpdatedAt: time.Now(),
 	}
 
-	value := makeEvent(product.AggregateType, product.EventProductImageUpdated, eventData)
+	value := makeEventJSON(product.AggregateType, product.EventProductImageUpdated, eventData)
 
 	err := projector.HandleEvent(ctx, nil, value)
 
@@ -684,10 +710,10 @@ func TestProjector_HandleUserUpdated(t *testing.T) {
 		Name: "Old Name",
 	})
 
-	eventData := user.UserUpdated{
-		UserID:    "user-123",
+	eventData := &userpb.UserUpdatedEvent{
+		UserId:    "user-123",
 		Name:      "New Name",
-		UpdatedAt: time.Now(),
+		UpdatedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(user.AggregateType, user.EventUserUpdated, eventData)
@@ -709,10 +735,10 @@ func TestProjector_HandleUserPasswordChanged(t *testing.T) {
 		PasswordHash: "old-hash",
 	})
 
-	eventData := user.UserPasswordChanged{
-		UserID:       "user-123",
+	eventData := &userpb.UserPasswordChangedEvent{
+		UserId:       "user-123",
 		PasswordHash: "new-hash",
-		ChangedAt:    time.Now(),
+		ChangedAt:    time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(user.AggregateType, user.EventUserPasswordChanged, eventData)
@@ -734,9 +760,9 @@ func TestProjector_HandleUserActivated(t *testing.T) {
 		IsActive: false,
 	})
 
-	eventData := user.UserActivated{
-		UserID:      "user-123",
-		ActivatedAt: time.Now(),
+	eventData := &userpb.UserActivatedEvent{
+		UserId:      "user-123",
+		ActivatedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(user.AggregateType, user.EventUserActivated, eventData)
@@ -764,11 +790,11 @@ func TestProjector_HandleStockDeducted(t *testing.T) {
 		AvailableStock: 80,
 	})
 
-	eventData := inventory.StockDeducted{
-		ProductID:  "prod-123",
-		OrderID:    "order-123",
+	eventData := &inventorypb.StockDeductedEvent{
+		ProductId:  "prod-123",
+		OrderId:    "order-123",
 		Quantity:   10,
-		DeductedAt: time.Now(),
+		DeductedAt: time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(inventory.AggregateType, inventory.EventStockDeducted, eventData)
@@ -797,13 +823,13 @@ func TestProjector_HandleCategoryUpdated(t *testing.T) {
 		Slug: "old-slug",
 	})
 
-	eventData := category.CategoryUpdated{
-		CategoryID:  "cat-123",
+	eventData := &categorypb.CategoryUpdatedEvent{
+		CategoryId:  "cat-123",
 		Name:        "New Name",
 		Slug:        "new-slug",
 		Description: "Updated description",
 		SortOrder:   2,
-		UpdatedAt:   time.Now(),
+		UpdatedAt:   time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(category.AggregateType, category.EventCategoryUpdated, eventData)
@@ -836,13 +862,13 @@ func TestProjector_HandleItemAdded_SameProductIncreasesQuantity(t *testing.T) {
 		Total: 2000,
 	})
 
-	eventData := cart.ItemAddedToCart{
-		CartID:    "cart-user-123",
-		UserID:    "user-123",
-		ProductID: "prod-123",
+	eventData := &cartpb.ItemAddedToCartEvent{
+		CartId:    "cart-user-123",
+		UserId:    "user-123",
+		ProductId: "prod-123",
 		Quantity:  3,
 		Price:     1000,
-		AddedAt:   time.Now(),
+		AddedAt:   time.Now().Format(time.RFC3339Nano),
 	}
 
 	value := makeEvent(cart.AggregateType, cart.EventItemAdded, eventData)
@@ -880,7 +906,7 @@ func TestProjector_HandleUnknownEventType(t *testing.T) {
 	projector, _ := newTestProjector()
 	ctx := context.Background()
 
-	value := makeEvent("UnknownAggregate", "UnknownEvent", struct{}{})
+	value := makeEventJSON("UnknownAggregate", "UnknownEvent", struct{}{})
 
 	// Should not error on unknown event types
 	err := projector.HandleEvent(ctx, nil, value)

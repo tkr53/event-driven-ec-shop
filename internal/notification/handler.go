@@ -9,15 +9,15 @@ import (
 	"github.com/example/ec-event-driven/internal/email"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/readmodel"
+	orderpb "github.com/example/ec-event-driven/proto/domain/orderpb"
+	"google.golang.org/protobuf/proto"
 )
 
-// Handler processes events for sending notifications
 type Handler struct {
 	emailService *email.Service
 	readStore    store.ReadStoreInterface
 }
 
-// NewHandler creates a new notification handler
 func NewHandler(emailSvc *email.Service, readStore store.ReadStoreInterface) *Handler {
 	return &Handler{
 		emailService: emailSvc,
@@ -25,7 +25,6 @@ func NewHandler(emailSvc *email.Service, readStore store.ReadStoreInterface) *Ha
 	}
 }
 
-// HandleEvent processes an event from Kinesis
 func (h *Handler) HandleEvent(ctx context.Context, key, value []byte) error {
 	var event store.Event
 	if err := json.Unmarshal(value, &event); err != nil {
@@ -33,7 +32,6 @@ func (h *Handler) HandleEvent(ctx context.Context, key, value []byte) error {
 		return err
 	}
 
-	// Only process OrderPlaced events
 	if event.EventType == order.EventOrderPlaced {
 		return h.handleOrderPlaced(ctx, event)
 	}
@@ -42,55 +40,58 @@ func (h *Handler) HandleEvent(ctx context.Context, key, value []byte) error {
 }
 
 func (h *Handler) handleOrderPlaced(ctx context.Context, event store.Event) error {
-	var e order.OrderPlaced
-	if err := json.Unmarshal(event.Data, &e); err != nil {
-		slog.ErrorContext(ctx, "failed to unmarshal OrderPlaced event", "error", err)
+	var binaryData []byte
+	if err := json.Unmarshal(event.Data, &binaryData); err != nil {
+		slog.ErrorContext(ctx, "failed to decode event data", "error", err)
 		return err
 	}
 
-	slog.InfoContext(ctx, "processing OrderPlaced event", "order_id", e.OrderID, "user_id", e.UserID)
+	var e orderpb.OrderPlacedEvent
+	if err := proto.Unmarshal(binaryData, &e); err != nil {
+		slog.ErrorContext(ctx, "failed to unmarshal OrderPlaced protobuf", "error", err)
+		return err
+	}
 
-	// Get user information from read store
-	userData, exists, err := h.readStore.Get("users", e.UserID)
+	slog.InfoContext(ctx, "processing OrderPlaced event", "order_id", e.OrderId, "user_id", e.UserId)
+
+	userData, exists, err := h.readStore.Get("users", e.UserId)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to get user", "user_id", e.UserID, "error", err)
+		slog.ErrorContext(ctx, "failed to get user", "user_id", e.UserId, "error", err)
 		return nil
 	}
 	if !exists {
-		slog.WarnContext(ctx, "user not found", "user_id", e.UserID)
+		slog.WarnContext(ctx, "user not found", "user_id", e.UserId)
 		return nil
 	}
 
 	user, ok := userData.(*readmodel.UserReadModel)
 	if !ok {
-		slog.WarnContext(ctx, "invalid user data type", "user_id", e.UserID)
+		slog.WarnContext(ctx, "invalid user data type", "user_id", e.UserId)
 		return nil
 	}
 
-	// Convert order items to email items
 	emailItems := make([]email.OrderItem, len(e.Items))
 	for i, item := range e.Items {
-		productName := item.ProductID
-		if productData, exists, _ := h.readStore.Get("products", item.ProductID); exists {
+		productName := item.ProductId
+		if productData, exists, _ := h.readStore.Get("products", item.ProductId); exists {
 			if product, ok := productData.(*readmodel.ProductReadModel); ok {
 				productName = product.Name
 			}
 		}
 
 		emailItems[i] = email.OrderItem{
-			ProductID: item.ProductID,
+			ProductID: item.ProductId,
 			Name:      productName,
-			Quantity:  item.Quantity,
-			Price:     item.Price,
+			Quantity:  int(item.Quantity),
+			Price:     int(item.Price),
 		}
 	}
 
-	// Send order confirmation email
-	if err := h.emailService.SendOrderConfirmation(user.Email, e.OrderID, e.Total, emailItems); err != nil {
+	if err := h.emailService.SendOrderConfirmation(user.Email, e.OrderId, int(e.Total), emailItems); err != nil {
 		slog.ErrorContext(ctx, "failed to send email", "email", user.Email, "error", err)
 		return err
 	}
 
-	slog.InfoContext(ctx, "order confirmation email sent", "email", user.Email, "order_id", e.OrderID)
+	slog.InfoContext(ctx, "order confirmation email sent", "email", user.Email, "order_id", e.OrderId)
 	return nil
 }

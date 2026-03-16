@@ -1,0 +1,69 @@
+syntax = "proto3";
+package domain.product;
+
+option go_package = "github.com/example/ec-event-driven/proto/domain/productpb";
+
+// Commands
+message CreateProductCommand {
+  string product_id = 1;
+  string name = 2;
+  string description = 3;
+  int32 price = 4;
+  int32 stock = 5;
+}
+
+message UpdateProductCommand {
+  string product_id = 1;
+  string name = 2;
+  string description = 3;
+  int32 price = 4;
+}
+
+message DeleteProductCommand {
+  string product_id = 1;
+}
+
+// Events
+message ProductCreatedEvent {
+  string product_id = 1;
+  string name = 2;
+  string description = 3;
+  int32 price = 4;
+  int32 stock = 5;
+  string created_at = 6;
+}
+
+message ProductUpdatedEvent {
+  string product_id = 1;
+  string name = 2;
+  string description = 3;
+  int32 price = 4;
+  string updated_at = 5;
+}
+
+message ProductDeletedEvent {
+  string product_id = 1;
+  string deleted_at = 2;
+}
+
+// Snapshot
+message ProductSnapshot {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  int32 price = 4;
+  int32 stock = 5;
+  bool is_deleted = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+
+// Response
+message ProductResponse {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  int32 price = 4;
+  int32 stock = 5;
+  string created_at = 6;
+}

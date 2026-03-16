@@ -1,0 +1,67 @@
+syntax = "proto3";
+package domain.order;
+
+option go_package = "github.com/example/ec-event-driven/proto/domain/orderpb";
+
+// Commands
+message PlaceOrderCommand {
+  string user_id = 1;
+  repeated OrderItem items = 2;
+}
+
+message PayOrderCommand {
+  string order_id = 1;
+}
+
+message ShipOrderCommand {
+  string order_id = 1;
+}
+
+message CancelOrderCommand {
+  string order_id = 1;
+  string reason = 2;
+}
+
+// Shared types
+message OrderItem {
+  string product_id = 1;
+  string name = 2;
+  int32 quantity = 3;
+  int32 price = 4;
+}
+
+// Events
+message OrderPlacedEvent {
+  string order_id = 1;
+  string user_id = 2;
+  repeated OrderItem items = 3;
+  int32 total = 4;
+  string placed_at = 5;
+}
+
+message OrderPaidEvent {
+  string order_id = 1;
+  string paid_at = 2;
+}
+
+message OrderShippedEvent {
+  string order_id = 1;
+  string shipped_at = 2;
+}
+
+message OrderCancelledEvent {
+  string order_id = 1;
+  string reason = 2;
+  string cancelled_at = 3;
+}
+
+// Snapshot
+message OrderSnapshot {
+  string id = 1;
+  string user_id = 2;
+  repeated OrderItem items = 3;
+  int32 total = 4;
+  string status = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}

@@ -1,0 +1,57 @@
+syntax = "proto3";
+package domain.cart;
+
+option go_package = "github.com/example/ec-event-driven/proto/domain/cartpb";
+
+// Commands
+message AddItemCommand {
+  string user_id = 1;
+  string product_id = 2;
+  int32 quantity = 3;
+  int32 price = 4;
+}
+
+message RemoveItemCommand {
+  string user_id = 1;
+  string product_id = 2;
+}
+
+message ClearCartCommand {
+  string user_id = 1;
+}
+
+// Events
+message ItemAddedToCartEvent {
+  string cart_id = 1;
+  string user_id = 2;
+  string product_id = 3;
+  int32 quantity = 4;
+  int32 price = 5;
+  string added_at = 6;
+}
+
+message ItemRemovedFromCartEvent {
+  string cart_id = 1;
+  string user_id = 2;
+  string product_id = 3;
+  string removed_at = 4;
+}
+
+message CartClearedEvent {
+  string cart_id = 1;
+  string user_id = 2;
+  string cleared_at = 3;
+}
+
+// Snapshot
+message CartItem {
+  string product_id = 1;
+  int32 quantity = 2;
+  int32 price = 3;
+}
+
+message CartSnapshot {
+  string id = 1;
+  string user_id = 2;
+  map<string, CartItem> items = 3;
+}

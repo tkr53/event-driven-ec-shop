@@ -12,14 +12,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	actorsystem "github.com/example/ec-event-driven/internal/actor"
 	"github.com/example/ec-event-driven/internal/api"
 	"github.com/example/ec-event-driven/internal/auth"
 	"github.com/example/ec-event-driven/internal/command"
-	"github.com/example/ec-event-driven/internal/domain/cart"
 	"github.com/example/ec-event-driven/internal/domain/category"
-	"github.com/example/ec-event-driven/internal/domain/inventory"
-	"github.com/example/ec-event-driven/internal/domain/order"
-	"github.com/example/ec-event-driven/internal/domain/product"
 	"github.com/example/ec-event-driven/internal/domain/user"
 	"github.com/example/ec-event-driven/internal/infrastructure/store"
 	"github.com/example/ec-event-driven/internal/observability"
@@ -79,7 +76,7 @@ func main() {
 	dynamoRegion := getEnv("DYNAMODB_REGION", "ap-northeast-1")
 	dynamoEndpoint := os.Getenv("DYNAMODB_ENDPOINT")
 
-	slog.Info("EC Shop - CQRS Mode (Kinesis)",
+	slog.Info("EC Shop - CQRS Mode (Kinesis + Proto.Actor)",
 		"write_db", "DynamoDB",
 		"read_db", "PostgreSQL",
 		"events", "DynamoDB → Kinesis → Lambda",
@@ -112,11 +109,7 @@ func main() {
 	// Initialize read store
 	readStore := store.NewPostgresReadStore(db)
 
-	// Initialize domain services
-	productSvc := product.NewService(eventStore)
-	cartSvc := cart.NewService(eventStore)
-	orderSvc := order.NewService(eventStore)
-	inventorySvc := inventory.NewService(eventStore)
+	// Initialize domain services (user/category still use legacy services directly)
 	userSvc := user.NewService(eventStore)
 	categorySvc := category.NewService(eventStore)
 
@@ -127,8 +120,11 @@ func main() {
 		7*24*time.Hour,
 	)
 
-	// Initialize handlers
-	cmdHandler := command.NewHandler(productSvc, cartSvc, orderSvc, inventorySvc, readStore)
+	// Initialize actor system
+	actorSys := actorsystem.NewSystem(eventStore, readStore)
+	cmdHandler := command.NewActorHandler(actorSys, readStore)
+	slog.Info("actor system initialized")
+
 	queryHandler := query.NewHandler(readStore)
 
 	slog.Info("read model updates delegated to Lambda Projector via Kinesis")
@@ -165,6 +161,8 @@ func main() {
 
 	slog.Info("shutting down...")
 	cancel()
+
+	actorSys.Shutdown()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()

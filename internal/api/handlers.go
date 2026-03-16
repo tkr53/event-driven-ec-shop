@@ -12,11 +12,11 @@ import (
 )
 
 type Handlers struct {
-	cmdHandler   *command.Handler
+	cmdHandler   command.CommandHandler
 	queryHandler *query.Handler
 }
 
-func NewHandlers(cmdHandler *command.Handler, queryHandler *query.Handler) *Handlers {
+func NewHandlers(cmdHandler command.CommandHandler, queryHandler *query.Handler) *Handlers {
 	return &Handlers{
 		cmdHandler:   cmdHandler,
 		queryHandler: queryHandler,

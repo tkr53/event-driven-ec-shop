@@ -1,5 +1,6 @@
 .PHONY: up down build api logs clean test test-coverage test-race \
-        build-lambda deploy-local logs-projector logs-notifier logs-loki
+        build-lambda deploy-local logs-projector logs-notifier logs-loki \
+        proto
 
 # 全サービス起動（コンテナ）
 up:
@@ -37,6 +38,21 @@ logs-localstack:
 clean:
 	docker-compose down -v
 	rm -rf dist/
+
+# ===========================================
+# Protobuf コード生成
+# ===========================================
+
+proto:
+	@echo "Generating protobuf code..."
+	PATH="$$PATH:$$(go env GOPATH)/bin" protoc --go_out=. --go_opt=module=github.com/example/ec-event-driven \
+		proto/domain/product.proto \
+		proto/domain/inventory.proto \
+		proto/domain/cart.proto \
+		proto/domain/order.proto \
+		proto/domain/user.proto \
+		proto/domain/category.proto
+	@echo "Protobuf code generated successfully"
 
 # ===========================================
 # Lambda ビルド・デプロイ
